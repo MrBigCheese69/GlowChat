@@ -1,52 +1,66 @@
 const WebSocket = require('ws');
+   const { MongoClient } = require('mongodb');
 
-const port = process.env.PORT || 3000;
-// Store messages by channel
-const messages = {
-    general: [],
-    random: []
-};
+   const port = process.env.PORT || 3000;
+   const uri = 'mongodb+srv://glowchatUser:<password>@glowchatcluster.mongodb.net/glowchat?retryWrites=true&w=majority'; // Replace with your connection string
+   const client = new MongoClient(uri);
 
-const wss = new WebSocket.Server({ port }, () => {
-    console.log(`WebSocket server running on port ${port}`);
-});
+   async function run() {
+       try {
+           await client.connect();
+           console.log('Connected to MongoDB');
+           const db = client.db('glowchat');
+           const messagesCollection = db.collection('messages');
 
-wss.on('connection', (ws) => {
-    console.log('New client connected');
-    // Send history for all channels to new client
-    Object.entries(messages).forEach(([channel, msgs]) => {
-        msgs.forEach(msg => ws.send(JSON.stringify(msg)));
-    });
+           const wss = new WebSocket.Server({ port }, () => {
+               console.log(`WebSocket server running on port ${port}`);
+           });
 
-    ws.on('message', (message) => {
-        try {
-            const data = JSON.parse(message);
-            if (data.type === 'message') {
-                if (!messages[data.channel]) messages[data.channel] = [];
-                messages[data.channel].push(data); // Store by channel
-                wss.clients.forEach((client) => {
-                    if (client.readyState === WebSocket.OPEN) {
-                        client.send(JSON.stringify(data));
-                    }
-                });
-            } else if (data.type === 'getHistory') {
-                const channelHistory = messages[data.channel] || [];
-                channelHistory.forEach(msg => ws.send(JSON.stringify(msg)));
-            }
-        } catch (error) {
-            console.error('Error processing message:', error);
-        }
-    });
+           wss.on('connection', async (ws) => {
+               console.log('New client connected');
+               // Send message history to new client
+               const history = await messagesCollection.find().toArray();
+               history.forEach(msg => ws.send(JSON.stringify(msg)));
 
-    ws.on('close', () => {
-        console.log('Client disconnected');
-    });
+               ws.on('message', async (message) => {
+                   try {
+                       const data = JSON.parse(message);
+                       if (data.type === 'message') {
+                           await messagesCollection.insertOne(data); // Store in MongoDB
+                           wss.clients.forEach((client) => {
+                               if (client.readyState === WebSocket.OPEN) {
+                                   client.send(JSON.stringify(data));
+                               }
+                           });
+                       } else if (data.type === 'getHistory') {
+                           const channelHistory = await messagesCollection.find({ channel: data.channel }).toArray();
+                           channelHistory.forEach(msg => ws.send(JSON.stringify(msg)));
+                       }
+                   } catch (error) {
+                       console.error('Error processing message:', error);
+                   }
+               });
 
-    ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
-    });
-});
+               ws.on('close', () => {
+                   console.log('Client disconnected');
+               });
 
-wss.on('error', (error) => {
-    console.error('Server error:', error);
-});
+               ws.on('error', (error) => {
+                   console.error('WebSocket error:', error);
+               });
+           });
+
+           wss.on('error', (error) => {
+               console.error('Server error:', error);
+           });
+       } catch (error) {
+           console.error('MongoDB connection error:', error);
+       }
+   }
+
+   run().catch(console.dir);
+
+   process.on('SIGTERM', () => {
+       client.close();
+       process.exit(0);
+   });
