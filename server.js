@@ -2,7 +2,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const { MongoClient } = require('mongodb');
 
-// Setup HTTP server (needed for WSS to work on Render)
+// Setup HTTP server (needed for WSS to work)
 const server = http.createServer((req, res) => {
     res.writeHead(200);
     res.end("GlowChat WebSocket Server");
@@ -12,8 +12,11 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 
 const port = process.env.PORT || 3000;
-const uri = "mongodb+srv://explodingcreper91:j3zd87jue9YASMjP@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority&appName=GlowChat&tls=true&tlsAllowInvalidCertificates=true";
-const client = new MongoClient(uri);
+const uri = "mongodb+srv://explodingcreper91:j3zd87jue9YASMjP@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority&appName=GlowChat";
+const client = new MongoClient(uri, {
+    tls: true,
+    minTLSVersion: 'TLSv1.2', // Enforce TLS 1.2 for MongoDB Atlas
+});
 
 async function run() {
     try {
