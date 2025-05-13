@@ -12,7 +12,7 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 
 const port = process.env.PORT || 3000;
-const uri = "mongodb+srv://explodingcreper91:<db_password>@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority&appName=GlowChat"; // Replace <db_password> with your real password
+const uri = "mongodb+srv://explodingcreper91:j3zd87jue9YASMjP@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority&appName=GlowChat";
 const client = new MongoClient(uri);
 
 async function run() {
