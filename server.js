@@ -2,7 +2,7 @@ const WebSocket = require('ws');
 const { MongoClient } = require('mongodb');
 
 const port = process.env.PORT || 3000;
-const uri = "mongodb+srv://explodingcreper91:<db_password>@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority&appName=GlowChat";
+const uri = "mongodb+srv://explodingcreper91:<db_password>@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority&appName=GlowChat"; // Replace <db_password> with your actual password
 const client = new MongoClient(uri);
 
 async function run() {
@@ -16,24 +16,44 @@ async function run() {
             console.log(`WebSocket server running on port ${port}`);
         });
 
+        const clientChannels = new Map(); // Track each client's active channel
+
         wss.on('connection', async (ws) => {
             console.log('New client connected');
-            // Send full message history to new client
-            const history = await messagesCollection.find().toArray();
+
+            // Default to 'general' on initial connect
+            clientChannels.set(ws, 'general');
+
+            // Send initial history for 'general'
+            const history = await messagesCollection.find({ channel: 'general' }).toArray();
             history.forEach(msg => ws.send(JSON.stringify(msg)));
 
             ws.on('message', async (message) => {
                 try {
                     const data = JSON.parse(message);
+
                     if (data.type === 'message') {
-                        await messagesCollection.insertOne(data); // Store globally
+                        await messagesCollection.insertOne(data);
+
+                        const senderChannel = data.channel;
+
                         wss.clients.forEach((client) => {
-                            if (client.readyState === WebSocket.OPEN) {
+                            if (
+                                client.readyState === WebSocket.OPEN &&
+                                clientChannels.get(client) === senderChannel
+                            ) {
                                 client.send(JSON.stringify(data));
                             }
                         });
+
                     } else if (data.type === 'getHistory') {
-                        const channelHistory = await messagesCollection.find({ channel: data.channel }).toArray();
+                        // Update tracked channel
+                        clientChannels.set(ws, data.channel);
+
+                        const channelHistory = await messagesCollection
+                            .find({ channel: data.channel })
+                            .toArray();
+
                         channelHistory.forEach(msg => ws.send(JSON.stringify(msg)));
                     }
                 } catch (error) {
@@ -42,6 +62,7 @@ async function run() {
             });
 
             ws.on('close', () => {
+                clientChannels.delete(ws);
                 console.log('Client disconnected');
             });
 
@@ -51,8 +72,9 @@ async function run() {
         });
 
         wss.on('error', (error) => {
-            console.error('Server error:', error);
+            console.error('WebSocket Server error:', error);
         });
+
     } catch (error) {
         console.error('MongoDB connection error:', error);
     }
@@ -60,6 +82,7 @@ async function run() {
 
 run().catch(console.dir);
 
+// Graceful shutdown
 process.on('SIGTERM', () => {
     client.close();
     process.exit(0);
