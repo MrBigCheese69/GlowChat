@@ -1,8 +1,18 @@
+const http = require('http');
 const WebSocket = require('ws');
 const { MongoClient } = require('mongodb');
 
+// Setup HTTP server (needed for WSS to work on Render)
+const server = http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end("GlowChat WebSocket Server");
+});
+
+// Attach WebSocket to HTTP server
+const wss = new WebSocket.Server({ server });
+
 const port = process.env.PORT || 3000;
-const uri = "mongodb+srv://explodingcreper91:<db_password>@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority&appName=GlowChat"; // Replace <db_password> with your actual password
+const uri = "mongodb+srv://explodingcreper91:<db_password>@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority&appName=GlowChat"; // Replace <db_password> with your real password
 const client = new MongoClient(uri);
 
 async function run() {
@@ -11,10 +21,6 @@ async function run() {
         console.log('Connected to MongoDB');
         const db = client.db('glowchat');
         const messagesCollection = db.collection('messages');
-
-        const wss = new WebSocket.Server({ port }, () => {
-            console.log(`WebSocket server running on port ${port}`);
-        });
 
         const clientChannels = new Map(); // Track each client's active channel
 
@@ -73,6 +79,11 @@ async function run() {
 
         wss.on('error', (error) => {
             console.error('WebSocket Server error:', error);
+        });
+
+        // Start HTTP server
+        server.listen(port, () => {
+            console.log(`Server listening on port ${port}`);
         });
 
     } catch (error) {
