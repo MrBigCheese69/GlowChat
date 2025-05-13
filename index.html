@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CoolChat</title>
+    <title>GlowChat</title> <!-- Updated to GlowChat -->
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 text-white flex h-screen">
     <!-- Sidebar -->
     <div class="w-64 bg-gray-800 p-4 flex flex-col">
-        <h1 class="text-2xl font-bold mb-4">CoolChat</h1>
+        <h1 class="text-2xl font-bold mb-4">GlowChat</h1>
         <div class="flex-1">
             <h2 class="text-lg font-semibold">Channels</h2>
             <ul id="channel-list" class="mt-2">
@@ -47,7 +47,7 @@
         </div>
     </div>
     <script>
-        const ws = new WebSocket('wss://your-websocket-server.com'); // Replace with your WebSocket server URL
+        const ws = new WebSocket('wss://your-service.onrender.com'); // Replace with your Render WebSocket URL
         const chatMessages = document.getElementById('chat-messages');
         const messageInput = document.getElementById('message-input');
         const sendButton = document.getElementById('send-button');
@@ -76,10 +76,15 @@
             messageElement.innerHTML = `${avatar}<div><strong>${data.username}</strong>: ${data.message}</div>`;
             chatMessages.appendChild(messageElement);
             chatMessages.scrollTop = chatMessages.scrollHeight;
+            console.log('Message displayed:', data); // Debug: Log received messages
         }
 
+        ws.onopen = () => console.log('WebSocket connected');
+        ws.onclose = () => console.log('WebSocket disconnected');
+        ws.onerror = (error) => console.error('WebSocket error:', error);
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+            console.log('Message received:', data); // Debug: Log incoming data
             if (data.type === 'message' && data.channel === activeChannel) {
                 displayMessage(data);
             }
@@ -88,14 +93,17 @@
         sendButton.addEventListener('click', () => {
             const message = messageInput.value.trim();
             if (message) {
-                ws.send(JSON.stringify({
+                const payload = {
                     type: 'message',
                     channel: activeChannel,
                     username: profile.username,
                     avatar: profile.avatar,
                     message
-                }));
+                };
+                ws.send(JSON.stringify(payload));
+                console.log('Message sent:', payload); // Debug: Log sent message
                 messageInput.value = '';
+                displayMessage(payload); // Display the sent message locally
             }
         });
 
