@@ -12,78 +12,138 @@ const io = new Server(server, {
 });
 
 const port = process.env.PORT || 3000;
-const db = new sqlite3.Database('glowchat.db');
 
-const users = new Map(); // socket.id -> { username, avatar }
+const db = new sqlite3.Database('glowchat.db', (err) => {
+    if (err) {
+        console.error('SQLite connection error:', err);
+    } else {
+        console.log('Connected to SQLite');
+        db.run(`CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel TEXT,
+            username TEXT,
+            avatar TEXT,
+            message TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+    }
+});
 
-db.run(`
-    CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel TEXT,
-        username TEXT,
-        avatar TEXT,
-        message TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-`);
-
-function updateActiveUsers() {
-    const activeUsers = Array.from(users.values());
-    io.emit('activeUsers', activeUsers);
-}
+// Track active users in each channel
+let activeUsers = {};
 
 io.on('connection', (socket) => {
-    console.log('Client connected:', socket.id);
+    console.log('New client connected:', socket.id);
+    let activeChannel = 'general';
 
-    socket.on('registerUser', ({ username, avatar }) => {
-        users.set(socket.id, { username, avatar });
-        updateActiveUsers();
+    // When a new user connects, add them to the channel's active users list
+    socket.on('joinChannel', (channel) => {
+        activeChannel = channel;
+        socket.join(activeChannel);
+        if (!activeUsers[activeChannel]) {
+            activeUsers[activeChannel] = [];
+        }
+        activeUsers[activeChannel].push(socket.id);
+
+        // Emit active users in the channel
+        io.to(activeChannel).emit('activeUsers', activeUsers[activeChannel]);
+
+        // Notify the channel that a new user has joined
+        io.to(activeChannel).emit('message', {
+            username: 'Server',
+            message: `${socket.id} has joined the channel.`,
+            avatar: '👤',
+            timestamp: new Date().toISOString()
+        });
     });
 
-    socket.on('getHistory', (channel) => {
-        db.all(
-            'SELECT * FROM messages WHERE channel = ? ORDER BY timestamp ASC',
-            [channel],
-            (err, rows) => {
-                if (!err) socket.emit('messageHistory', rows);
-            }
-        );
-    });
-
+    // Handle new messages
     socket.on('message', (data) => {
         const { channel, username, avatar, message } = data;
-        db.run(
-            'INSERT INTO messages (channel, username, avatar, message) VALUES (?, ?, ?, ?)',
+        activeChannel = channel;
+        socket.join(channel);
+
+        db.run('INSERT INTO messages (channel, username, avatar, message) VALUES (?, ?, ?, ?)',
             [channel, username, avatar, message],
             (err) => {
-                if (!err) {
-                    io.to(channel).emit('message', {
-                        channel,
-                        username,
-                        avatar,
-                        message,
-                        timestamp: new Date().toISOString()
-                    });
-                }
+                if (err) return console.error('Error saving message:', err);
+                io.to(channel).emit('message', { 
+                    id: this.lastID, 
+                    channel, 
+                    username, 
+                    avatar, 
+                    message, 
+                    timestamp: new Date().toISOString() 
+                });
             }
         );
     });
 
-    socket.on('typing', ({ channel, username }) => {
-        socket.broadcast.to(channel).emit('typing', username);
-    });
-
-    socket.on('joinChannel', (channel) => {
+    // Handle fetching message history
+    socket.on('getHistory', (channel) => {
+        activeChannel = channel;
         socket.join(channel);
+        db.all('SELECT * FROM messages WHERE channel = ?', [channel], (err, rows) => {
+            if (err) return console.error('Error fetching history:', err);
+            rows.forEach((row) => socket.emit('message', {
+                id: row.id,
+                channel: row.channel, 
+                username: row.username, 
+                avatar: row.avatar, 
+                message: row.message, 
+                timestamp: row.timestamp
+            }));
+        });
     });
 
+    // Handle typing indicator
+    socket.on('typing', (data) => {
+        const { channel, username } = data;
+        socket.to(channel).emit('typing', { username });
+    });
+
+    // Handle message editing
+    socket.on('editMessage', ({ id, newMessage }) => {
+        db.get('SELECT * FROM messages WHERE id = ?', [id], (err, row) => {
+            if (err || !row) return;
+            if (row.username === socket.username) {
+                db.run('UPDATE messages SET message = ? WHERE id = ?', [newMessage, id], (err) => {
+                    if (!err) {
+                        io.to(row.channel).emit('messageEdited', { id, newMessage });
+                    }
+                });
+            }
+        });
+    });
+
+    // Handle message deletion
+    socket.on('deleteMessage', (id) => {
+        db.get('SELECT * FROM messages WHERE id = ?', [id], (err, row) => {
+            if (err || !row) return;
+            if (row.username === socket.username) {
+                db.run('DELETE FROM messages WHERE id = ?', [id], (err) => {
+                    if (!err) {
+                        io.to(row.channel).emit('messageDeleted', id);
+                    }
+                });
+            }
+        });
+    });
+
+    // Remove user from active users on disconnect
     socket.on('disconnect', () => {
-        users.delete(socket.id);
-        updateActiveUsers();
         console.log('Client disconnected:', socket.id);
+        if (activeUsers[activeChannel]) {
+            activeUsers[activeChannel] = activeUsers[activeChannel].filter(id => id !== socket.id);
+            io.to(activeChannel).emit('activeUsers', activeUsers[activeChannel]);
+        }
     });
 });
 
-server.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
+server.listen(port, () => console.log(`Server listening on port ${port}`));
+
+process.on('SIGTERM', () => {
+    db.close();
+    server.close();
+    process.exit(0);
 });
