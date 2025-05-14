@@ -12,11 +12,8 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 
 const port = process.env.PORT || 3000;
-const uri = "mongodb+srv://explodingcreper91:j3zd87jue9YASMjP@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority&appName=GlowChat";
-const client = new MongoClient(uri, {
-    tls: true,
-    tlsMinimumVersion: 'TLSv1.2', // Enforce TLS 1.2 for MongoDB Atlas
-});
+const uri = "mongodb+srv://explodingcreper91:j3zd87jue9YASMjP@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority";
+const client = new MongoClient(uri);
 
 async function run() {
     try {
@@ -25,44 +22,28 @@ async function run() {
         const db = client.db('glowchat');
         const messagesCollection = db.collection('messages');
 
-        const clientChannels = new Map(); // Track each client's active channel
+        const clientChannels = new Map();
 
         wss.on('connection', async (ws) => {
             console.log('New client connected');
-
-            // Default to 'general' on initial connect
             clientChannels.set(ws, 'general');
-
-            // Send initial history for 'general'
             const history = await messagesCollection.find({ channel: 'general' }).toArray();
             history.forEach(msg => ws.send(JSON.stringify(msg)));
 
             ws.on('message', async (message) => {
                 try {
                     const data = JSON.parse(message);
-
                     if (data.type === 'message') {
                         await messagesCollection.insertOne(data);
-
                         const senderChannel = data.channel;
-
                         wss.clients.forEach((client) => {
-                            if (
-                                client.readyState === WebSocket.OPEN &&
-                                clientChannels.get(client) === senderChannel
-                            ) {
+                            if (client.readyState === WebSocket.OPEN && clientChannels.get(client) === senderChannel) {
                                 client.send(JSON.stringify(data));
                             }
                         });
-
                     } else if (data.type === 'getHistory') {
-                        // Update tracked channel
                         clientChannels.set(ws, data.channel);
-
-                        const channelHistory = await messagesCollection
-                            .find({ channel: data.channel })
-                            .toArray();
-
+                        const channelHistory = await messagesCollection.find({ channel: data.channel }).toArray();
                         channelHistory.forEach(msg => ws.send(JSON.stringify(msg)));
                     }
                 } catch (error) {
@@ -84,7 +65,6 @@ async function run() {
             console.error('WebSocket Server error:', error);
         });
 
-        // Start HTTP server
         server.listen(port, () => {
             console.log(`Server listening on port ${port}`);
         });
@@ -96,7 +76,6 @@ async function run() {
 
 run().catch(console.dir);
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
     client.close();
     process.exit(0);
