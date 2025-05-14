@@ -1,82 +1,126 @@
 const http = require('http');
-const WebSocket = require('ws');
-const { MongoClient } = require('mongodb');
+const { Server } = require('socket.io');
+const sqlite3 = require('sqlite3').verbose();
 
-// Setup HTTP server (needed for WSS to work on Render)
+// Setup HTTP server
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end("GlowChat WebSocket Server is running");
+    res.end("GlowChat Socket.IO Server");
 });
 
-// Attach WebSocket to HTTP server
-const wss = new WebSocket.Server({ server });
+// Attach Socket.IO to the server
+const io = new Server(server, {
+    cors: {
+        origin: "*", // Allow all origins for testing; restrict in production
+        methods: ["GET", "POST"]
+    }
+});
 
 const port = process.env.PORT || 3000;
-const uri = "mongodb+srv://explodingcreper91:j3zd87jue9YASMjP@glowchat.jh5jzxu.mongodb.net/?retryWrites=true&w=majority";
-const client = new MongoClient(uri);
 
-async function run() {
-    try {
-        await client.connect();
-        console.log('Connected to MongoDB');
-        const db = client.db('glowchat');
-        const messagesCollection = db.collection('messages');
-
-        const clientChannels = new Map();
-
-        wss.on('connection', async (ws) => {
-            console.log('New client connected');
-            clientChannels.set(ws, 'general');
-            const history = await messagesCollection.find({ channel: 'general' }).toArray();
-            history.forEach(msg => ws.send(JSON.stringify(msg)));
-
-            ws.on('message', async (message) => {
-                try {
-                    const data = JSON.parse(message);
-                    if (data.type === 'message') {
-                        await messagesCollection.insertOne(data);
-                        const senderChannel = data.channel;
-                        wss.clients.forEach((client) => {
-                            if (client.readyState === WebSocket.OPEN && clientChannels.get(client) === senderChannel) {
-                                client.send(JSON.stringify(data));
-                            }
-                        });
-                    } else if (data.type === 'getHistory') {
-                        clientChannels.set(ws, data.channel);
-                        const channelHistory = await messagesCollection.find({ channel: data.channel }).toArray();
-                        channelHistory.forEach(msg => ws.send(JSON.stringify(msg)));
-                    }
-                } catch (error) {
-                    console.error('Error processing message:', error);
-                }
-            });
-
-            ws.on('close', () => {
-                clientChannels.delete(ws);
-                console.log('Client disconnected');
-            });
-
-            ws.on('error', (error) => {
-                console.error('WebSocket error:', error);
-            });
-        });
-
-        wss.on('error', (error) => {
-            console.error('WebSocket Server error:', error);
-        });
-
-        server.listen(port, () => {
-            console.log(`Server listening on port ${port}`);
-        });
-
-    } catch (error) {
-        console.error('MongoDB connection error:', error);
+// Initialize SQLite database
+const db = new sqlite3.Database('glowchat.db', (err) => {
+    if (err) {
+        console.error('SQLite connection error:', err);
+    } else {
+        console.log('Connected to SQLite');
+        // Create messages table if it doesn't exist
+        db.run(`CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel TEXT,
+            username TEXT,
+            avatar TEXT,
+            message TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
     }
-}
+});
 
-run().catch(console.dir);
+io.on('connection', (socket) => {
+    console.log('New client connected:', socket.id);
 
+    // Track client's active channel
+    let activeChannel = 'general';
+    socket.join(activeChannel);
+
+    // Send message history for the client's channel
+    db.all('SELECT * FROM messages WHERE channel = ?', [activeChannel], (err, rows) => {
+        if (err) {
+            console.error('Error fetching history:', err);
+            return;
+        }
+        rows.forEach((row) => {
+            socket.emit('message', {
+                channel: row.channel,
+                username: row.username,
+                avatar: row.avatar,
+                message: row.message,
+                timestamp: row.timestamp
+            });
+        });
+    });
+
+    // Handle incoming messages
+    socket.on('message', (data) => {
+        const { channel, username, avatar, message } = data;
+        activeChannel = channel;
+        socket.join(channel);
+
+        // Save message to SQLite
+        db.run(
+            'INSERT INTO messages (channel, username, avatar, message) VALUES (?, ?, ?, ?)',
+            [channel, username, avatar, message],
+            (err) => {
+                if (err) {
+                    console.error('Error saving message:', err);
+                    return;
+                }
+                // Broadcast message to all clients in the same channel
+                io.to(channel).emit('message', {
+                    channel,
+                    username,
+                    avatar,
+                    message,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        );
+    });
+
+    // Handle channel switch and history request
+    socket.on('getHistory', (channel) => {
+        activeChannel = channel;
+        socket.join(channel);
+        db.all('SELECT * FROM messages WHERE channel = ?', [channel], (err, rows) => {
+            if (err) {
+                console.error('Error fetching history:', err);
+                return;
+            }
+            rows.forEach((row) => {
+                socket.emit('message', {
+                    channel: row.channel,
+                    username: row.username,
+                    avatar: row.avatar,
+                    message: row.message,
+                    timestamp: row.timestamp
+                });
+            });
+        });
+    });
+
+    socket.on('disconnect', () => {
+        console.log('Client disconnected:', socket.id);
+    });
+});
+
+// Start the server
+server.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+});
+
+// Graceful shutdown
 process.on('SIGTERM', () => {
-    client.close();
+    db.close();
+    server.close();
     process.exit(0);
 });
