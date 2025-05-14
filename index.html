@@ -29,17 +29,14 @@
     width: 6px;
     height: 6px;
   }
-
   ::-webkit-scrollbar-track {
     background: rgba(17, 24, 39, 0.7);
     border-radius: 3px;
   }
-
   ::-webkit-scrollbar-thumb {
     background: rgba(107, 114, 128, 0.5);
     border-radius: 3px;
   }
-
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(107, 114, 128, 0.7);
   }
@@ -57,7 +54,6 @@
     box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
     transition: all 0.3s ease;
   }
-
   .glow-button:hover {
     box-shadow: 0 0 15px rgba(139, 92, 246, 0.7), 0 0 25px rgba(139, 92, 246, 0.4);
   }
@@ -67,7 +63,6 @@
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
   }
-
   .message-animation {
     animation: fadeIn 0.3s ease-out forwards;
   }
@@ -77,7 +72,6 @@
     from { transform: translateX(-100%); }
     to { transform: translateX(0); }
   }
-
   .sidebar-animation {
     animation: slideIn 0.3s ease-out forwards;
   }
@@ -109,19 +103,19 @@
 </script>
 </head>
 <body class="bg-gray-900 text-white flex flex-col md:flex-row h-screen overflow-hidden">
-  <!-- Mobile Header -->
-  <div class="md:hidden flex items-center justify-between p-4 bg-dark-lighter border-b border-gray-700">
+  <!-- Navbar always visible -->
+  <div class="fixed md:static top-0 w-full md:w-72 z-30 flex items-center justify-between p-4 bg-gray-900 border-b border-gray-700">
     <div class="flex items-center">
-      <button id="mobile-menu-button" class="mr-3 text-gray-300 hover:text-white">
+      <button id="mobile-menu-button" class="mr-3 text-gray-300 hover:text-white md:hidden">
         <i data-lucide="menu" class="w-6 h-6"></i>
       </button>
       <h1 class="text-xl font-bold glow-text bg-gradient-to-r from-purple-500 to-indigo-500 bg-clip-text text-transparent">GlowChat</h1>
     </div>
-    <div id="mobile-channel-display" class="text-lg font-medium">General</div>
+    <div id="mobile-channel-display" class="text-lg font-medium hidden md:block">General</div>
   </div>
 
   <!-- Sidebar -->
-  <div id="sidebar" class="hidden md:flex flex-col w-full md:w-72 bg-dark-DEFAULT border-r border-gray-800 transform transition-all duration-300 ease-in-out md:transform-none md:opacity-100 md:relative absolute inset-y-0 left-0 z-20">
+  <div id="sidebar" class="hidden md:flex flex-col w-72 bg-dark-DEFAULT border-r border-gray-800 pt-16 md:pt-4 fixed md:static inset-y-0 left-0 z-20">
     <div class="p-4 border-b border-gray-800">
       <h1 class="text-2xl font-bold glow-text bg-gradient-to-r from-purple-500 to-indigo-500 bg-clip-text text-transparent">GlowChat</h1>
       <p class="text-gray-400 text-sm mt-1">Connect and chat in real-time</p>
@@ -191,10 +185,10 @@
     </div>
   </div>
 
-  <!-- Chat Area -->
-  <div class="flex-1 flex flex-col h-full md:h-screen">
+  <!-- Main Chat Area -->
+  <div class="flex-1 flex flex-col h-full ml-0 md:ml-72">
     <!-- Chat Header -->
-    <div class="hidden md:flex items-center justify-between p-4 border-b border-gray-800 bg-dark-lighter">
+    <div class="flex md:flex items-center justify-between p-4 border-b border-gray-800 bg-dark-lighter fixed md:static top-0 w-full z-20">
       <div class="flex items-center">
         <i data-lucide="hash" class="w-5 h-5 mr-2 text-gray-400"></i>
         <h2 id="current-channel" class="text-lg font-medium">General</h2>
@@ -212,9 +206,9 @@
       </div>
     </div>
 
-    <!-- Messages Area -->
-    <div id="chat-messages" class="flex-1 p-4 overflow-y-auto bg-dark-DEFAULT flex flex-col-reverse">
-      <!-- Default welcome message -->
+    <!-- Messages -->
+    <div id="chat-messages" class="flex-1 p-4 overflow-y-auto flex flex-col-reverse pt-20 md:pt-20" style="margin-top: 80px;">
+      <!-- default welcome message -->
       <div class="flex flex-col items-center justify-center h-full text-center text-gray-500">
         <div class="w-16 h-16 mb-4 rounded-full bg-gray-800 flex items-center justify-center">
           <i data-lucide="message-circle" class="w-8 h-8"></i>
@@ -224,16 +218,19 @@
       </div>
     </div>
 
-    <!-- Message Input -->
-    <div class="p-4 border-t border-gray-800 bg-dark-lighter">
+    <!-- Message input (moved up a little) -->
+    <div class="p-4 border-t border-gray-800 bg-dark-lighter relative z-10" style="margin-bottom: 80px;"> 
+      <!-- moved up to avoid cut off -->
       <div class="flex items-center space-x-2">
-        <input id="message-input" type="text" class="flex-1 p-3 bg-dark-DEFAULT rounded-lg border border-gray-700 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" placeholder="Type a message..." />
+        <input id="message-input" type="text" class="flex-1 p-3 bg-dark-DEFAULT text-white rounded-lg border border-gray-700 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" placeholder="Type a message..." />
         <button id="send-button" class="p-3 rounded-md bg-primary hover:bg-primary transition-all flex items-center justify-center ml-2">
           <i data-lucide="send" class="w-5 h-5"></i>
         </button>
       </div>
     </div>
   </div>
+
+  <!-- Profile Modal and Notification remain unchanged, same as previous code -->
 
   <!-- Profile Modal -->
   <div id="profile-modal" class="hidden fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-30 p-4">
@@ -377,9 +374,9 @@
     function showNotification(message, duration = 3000) {
       notificationText.textContent = message;
       notification.classList.remove('hidden', 'translate-y-10', 'opacity-0');
+      // Animate in
+      void notification.offsetWidth; // force reflow
       notification.classList.remove('translate-y-10', 'opacity-0');
-      // Force reflow for animation
-      void notification.offsetWidth;
       notification.classList.add('translate-y-0', 'opacity-100');
 
       setTimeout(() => {
@@ -404,25 +401,21 @@
       }
     }
 
-    // Socket.IO event handlers
+    // Socket events
     socket.on('connect', () => {
-      console.log('Socket.IO connected');
+      console.log('Connected');
       socket.emit('getHistory', activeChannel);
       showNotification('Connected to GlowChat server');
       updateProfileDisplay();
     });
-
     socket.on('message', (data) => {
       displayMessage(data);
     });
-
     socket.on('disconnect', () => {
-      console.log('Socket.IO disconnected');
+      console.log('Disconnected');
       showNotification('Disconnected from server. Trying to reconnect...', 5000);
     });
-
-    socket.on('error', (error) => {
-      console.error('Socket.IO error:', error);
+    socket.on('error', () => {
       showNotification('Error connecting to server', 5000);
     });
 
@@ -430,26 +423,24 @@
     document.getElementById('send-button').addEventListener('click', () => {
       const message = messageInput.value.trim();
       if (message) {
-        const payload = {
+        socket.emit('message', {
           channel: activeChannel,
           username: profile.username,
           avatar: profile.avatar,
           message,
-        };
-        socket.emit('message', payload);
+        });
         messageInput.value = '';
         messageInput.focus();
       }
     });
-
-    // Enter key sends message
+    // Enter key
     messageInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
         document.getElementById('send-button').click();
       }
     });
 
-    // Channel selection
+    // Channel switch
     document.getElementById('channel-list').addEventListener('click', (e) => {
       const channelItem = e.target.closest('.channel-item');
       if (channelItem) {
@@ -470,8 +461,6 @@
           lucide.createIcons();
           socket.emit('getHistory', activeChannel);
           updateActiveChannel(channel);
-
-          // Close mobile sidebar after selection
           if (window.innerWidth < 768) {
             sidebar.classList.add('hidden');
           }
@@ -485,7 +474,6 @@
       document.getElementById('avatar-input').value = profile.avatar;
       document.getElementById('profile-modal').classList.remove('hidden');
     });
-
     document.getElementById('save-profile').addEventListener('click', () => {
       const newUsername = document.getElementById('username-input').value.trim();
       const newAvatar = document.getElementById('avatar-input').value.trim();
@@ -499,11 +487,9 @@
         alert('Username is required!');
       }
     });
-
     document.getElementById('cancel-profile').addEventListener('click', () => {
       document.getElementById('profile-modal').classList.add('hidden');
     });
-
     document.getElementById('close-profile').addEventListener('click', () => {
       document.getElementById('profile-modal').classList.add('hidden');
     });
@@ -528,7 +514,7 @@
       }, 300);
     });
 
-    // Close sidebar when clicking outside on mobile
+    // Close sidebar on outside click on mobile
     document.addEventListener('click', (e) => {
       if (
         window.innerWidth < 768 &&
@@ -541,7 +527,7 @@
       }
     });
 
-    // Handle window resize
+    // Resize handler
     window.addEventListener('resize', () => {
       if (window.innerWidth >= 768) {
         sidebar.classList.remove('hidden');
@@ -556,6 +542,11 @@
     // Initialize
     updateActiveChannel(activeChannel);
     updateProfileDisplay();
+
+    // Scroll chat to bottom on load
+    window.onload = () => {
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    };
   </script>
 </body>
 </html>
