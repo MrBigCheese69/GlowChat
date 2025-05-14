@@ -66,47 +66,46 @@
     const avatarInput = document.getElementById('avatar-input');
     const saveProfile = document.getElementById('save-profile');
     const cancelProfile = document.getElementById('cancel-profile');
-
+  
     let activeChannel = 'general';
     let profile = JSON.parse(localStorage.getItem('profile')) || {
       username: 'User' + Math.floor(Math.random() * 1000),
       avatar: '😎'
     };
-
+  
     function updateProfile() {
       localStorage.setItem('profile', JSON.stringify(profile));
     }
-
+  
     function displayMessage(data) {
-      if (data.channel === activeChannel) {
-        const messageElement = document.createElement('div');
-        messageElement.className = 'p-2 bg-gray-800 rounded flex items-center';
-        const avatar = /^https?:\/\//.test(data.avatar)
-          ? `<img src="${data.avatar}" class="w-8 h-8 rounded-full mr-2" alt="avatar">`
-          : `<span class="text-2xl mr-2">${data.avatar}</span>`;
-        messageElement.innerHTML = `${avatar}<div><strong>${data.username}</strong>: ${data.message}</div>`;
-        chatMessages.appendChild(messageElement);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-      }
+      const messageElement = document.createElement('div');
+      messageElement.className = 'p-2 bg-gray-800 rounded flex items-center';
+      const avatar = /^https?:\/\//.test(data.avatar)
+        ? `<img src="${data.avatar}" class="w-8 h-8 rounded-full mr-2" alt="avatar">`
+        : `<span class="text-2xl mr-2">${data.avatar}</span>`;
+      messageElement.innerHTML = `${avatar}<div><strong>${data.username}</strong>: ${data.message}</div>`;
+      chatMessages.appendChild(messageElement);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
     }
-
+  
     socket.on('connect', () => {
-      console.log('Connected to Socket.IO');
+      console.log('Connected to server');
       socket.emit('getHistory', activeChannel);
     });
-
+  
     socket.on('message', (data) => {
-      displayMessage(data);
+      if (data.channel === activeChannel) {
+        displayMessage(data);
+      }
     });
-
-    socket.on('disconnect', () => {
-      console.log('Socket.IO disconnected');
+  
+    // Ensure no duplicate history listeners
+    socket.off('messageHistory');
+    socket.on('messageHistory', (history) => {
+      chatMessages.innerHTML = ''; // Clear old messages
+      history.forEach(displayMessage);
     });
-
-    socket.on('error', (error) => {
-      console.error('Socket.IO error:', error);
-    });
-
+  
     sendButton.addEventListener('click', () => {
       const message = messageInput.value.trim();
       if (message) {
@@ -116,20 +115,20 @@
           avatar: profile.avatar,
           message
         };
-        socket.emit('message', payload); // server will broadcast back
+        socket.emit('message', payload);
         messageInput.value = '';
       }
     });
-
+  
     messageInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
         sendButton.click();
       }
     });
-
+  
     channelList.addEventListener('click', (e) => {
       const channel = e.target.dataset.channel;
-      if (channel) {
+      if (channel && channel !== activeChannel) {
         activeChannel = channel;
         currentChannel.textContent = channel.charAt(0).toUpperCase() + channel.slice(1);
         chatMessages.innerHTML = '';
@@ -138,13 +137,13 @@
         e.target.classList.add('bg-gray-600');
       }
     });
-
+  
     profileButton.addEventListener('click', () => {
       usernameInput.value = profile.username;
       avatarInput.value = profile.avatar;
       profileModal.classList.remove('hidden');
     });
-
+  
     saveProfile.addEventListener('click', () => {
       const newUsername = usernameInput.value.trim();
       const newAvatar = avatarInput.value.trim();
@@ -157,10 +156,11 @@
         alert('Username is required!');
       }
     });
-
+  
     cancelProfile.addEventListener('click', () => {
       profileModal.classList.add('hidden');
     });
   </script>
+  
 </body>
 </html>
