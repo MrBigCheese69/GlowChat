@@ -36,10 +36,12 @@ io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
     let activeChannel = 'general';
 
-    // When a new user connects, add them to the channel's active users list
+    // Add user to active users when they join a channel
     socket.on('joinChannel', (channel) => {
         activeChannel = channel;
         socket.join(activeChannel);
+
+        // Add user to active users list for the current channel
         if (!activeUsers[activeChannel]) {
             activeUsers[activeChannel] = [];
         }
@@ -57,7 +59,7 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Handle new messages
+    // Handle message sending
     socket.on('message', (data) => {
         const { channel, username, avatar, message } = data;
         activeChannel = channel;
@@ -65,7 +67,7 @@ io.on('connection', (socket) => {
 
         db.run('INSERT INTO messages (channel, username, avatar, message) VALUES (?, ?, ?, ?)',
             [channel, username, avatar, message],
-            (err) => {
+            function (err) {
                 if (err) return console.error('Error saving message:', err);
                 io.to(channel).emit('message', { 
                     id: this.lastID, 
@@ -79,7 +81,7 @@ io.on('connection', (socket) => {
         );
     });
 
-    // Handle fetching message history
+    // Handle message history request
     socket.on('getHistory', (channel) => {
         activeChannel = channel;
         socket.join(channel);
@@ -130,7 +132,7 @@ io.on('connection', (socket) => {
         });
     });
 
-    // Remove user from active users on disconnect
+    // Handle disconnect
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
         if (activeUsers[activeChannel]) {
