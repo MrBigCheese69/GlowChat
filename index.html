@@ -1,119 +1,119 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GlowChat</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Load Socket.IO client -->
-    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GlowChat</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
 </head>
-<body class="bg-gray-900 text-white flex h-screen">
+<body class="bg-gray-900 text-white h-screen flex flex-col">
+  <!-- Header -->
+  <div class="bg-gray-800 p-4 flex justify-between items-center">
+    <h1 class="text-2xl font-bold">GlowChat</h1>
+    <button id="profile-button" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Edit Profile</button>
+  </div>
 
-    <!-- Sidebar -->
-    <div class="w-64 bg-gray-800 p-4 flex flex-col">
-        <h1 class="text-2xl font-bold mb-4">GlowChat</h1>
-        <div class="flex-1">
-            <h2 class="text-lg font-semibold">Channels</h2>
-            <ul id="channel-list" class="mt-2">
-                <li class="p-2 bg-gray-700 rounded cursor-pointer" data-channel="general">General</li>
-                <li class="p-2 bg-gray-700 rounded cursor-pointer" data-channel="random">Random</li>
-            </ul>
-        </div>
-        <div class="mt-auto">
-            <button id="profile-button" class="w-full p-2 bg-blue-600 rounded hover:bg-blue-700">Edit Profile</button>
-        </div>
+  <!-- Chat Messages -->
+  <div id="chat-messages" class="flex-1 p-4 overflow-y-auto"></div>
+
+  <!-- Input Area -->
+  <div class="p-4 bg-gray-800 flex gap-2">
+    <input id="message-input" type="text" placeholder="Type a message..." class="flex-1 p-2 bg-gray-700 rounded">
+    <button id="send-button" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Send</button>
+  </div>
+
+  <!-- Profile Modal -->
+  <div id="profile-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center hidden">
+    <div class="bg-gray-800 p-6 rounded shadow-xl w-80">
+      <h2 class="text-xl mb-4 font-semibold">Edit Profile</h2>
+      <label class="block mb-2">Username:</label>
+      <input type="text" id="edit-username" class="w-full p-2 rounded bg-gray-700 text-white mb-4">
+      <label class="block mb-2">Avatar Emoji:</label>
+      <input type="text" id="edit-avatar" maxlength="2" class="w-full p-2 rounded bg-gray-700 text-white mb-4">
+      <div class="flex justify-end gap-2">
+        <button id="cancel-profile" class="px-4 py-2 bg-gray-600 rounded hover:bg-gray-500">Cancel</button>
+        <button id="save-profile" class="px-4 py-2 bg-blue-600 rounded hover:bg-blue-500">Save</button>
+      </div>
     </div>
+  </div>
 
-    <!-- Chat Area -->
-    <div class="flex-1 flex flex-col">
-        <div class="p-4 border-b border-gray-700">
-            <h2 id="current-channel" class="text-xl font-semibold">General</h2>
-        </div>
-        <div id="chat-messages" class="flex-1 p-4 overflow-y-auto"></div>
-        <div id="typing-indicator" class="p-2 text-gray-400 hidden"></div>
-        <div class="p-4 border-t border-gray-700">
-            <input id="message-input" type="text" class="w-full p-2 bg-gray-800 rounded text-white" placeholder="Type a message...">
-            <button id="send-button" class="mt-2 p-2 bg-blue-600 rounded hover:bg-blue-700">Send</button>
-        </div>
-    </div>
+  <script>
+    const socket = io('https://glowchat-uaxw.onrender.com');
+    const chatMessages = document.getElementById('chat-messages');
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-button');
+    const profileButton = document.getElementById('profile-button');
+    const modal = document.getElementById('profile-modal');
+    const editUsername = document.getElementById('edit-username');
+    const editAvatar = document.getElementById('edit-avatar');
+    const saveBtn = document.getElementById('save-profile');
+    const cancelBtn = document.getElementById('cancel-profile');
 
-    <script>
-        const socket = io('https://glowchat-uaxw.onrender.com');
-        const chatMessages = document.getElementById('chat-messages');
-        const messageInput = document.getElementById('message-input');
-        const sendButton = document.getElementById('send-button');
-        const channelList = document.getElementById('channel-list');
-        const currentChannel = document.getElementById('current-channel');
-        const typingIndicator = document.getElementById('typing-indicator');
-        const profileButton = document.getElementById('profile-button');
+    let profile = { username: 'User' + Math.floor(Math.random() * 1000), avatar: '😎' };
+    const savedProfile = JSON.parse(localStorage.getItem('glowchat-profile'));
+    if (savedProfile) profile = savedProfile;
 
-        let activeChannel = 'general';
-        let profile = { username: 'User' + Math.floor(Math.random() * 1000), avatar: '😎' };
+    function saveProfile() {
+      localStorage.setItem('glowchat-profile', JSON.stringify(profile));
+    }
 
-        // Register user and set up profile
-        socket.emit('joinChannel', activeChannel);
+    function displayMessage(data) {
+      const messageEl = document.createElement('div');
+      messageEl.className = 'mb-2 flex items-start';
+      const avatar = /^https?:\/\//.test(data.avatar) ?
+        `<img src="${data.avatar}" class="w-8 h-8 rounded-full mr-2">` :
+        `<span class="text-2xl mr-2">${data.avatar}</span>`;
+      messageEl.innerHTML = `${avatar}<div><strong>${data.username}</strong>: ${data.message}</div>`;
+      chatMessages.appendChild(messageEl);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
 
-        function displayMessage({ id, username, avatar, message }) {
-            const el = document.createElement('div');
-            el.className = 'p-2 bg-gray-800 rounded';
-            el.dataset.id = id;
+    socket.on('connect', () => {
+      socket.emit('getHistory', 'general');
+    });
 
-            const avatarHTML = `<span class="text-2xl">${avatar}</span>`;
-            el.innerHTML = `
-                <div class="flex items-start gap-2">
-                    ${avatarHTML}
-                    <div>
-                        <strong>${username}</strong><br/>
-                        <span>${message}</span>
-                    </div>
-                </div>
-            `;
-            chatMessages.appendChild(el);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
+    socket.on('message', displayMessage);
 
-        // Handle typing indicator
-        messageInput.addEventListener('input', () => {
-            socket.emit('typing', { channel: activeChannel, username: profile.username });
+    sendButton.addEventListener('click', () => {
+      const msg = messageInput.value.trim();
+      if (msg) {
+        socket.emit('message', {
+          channel: 'general',
+          username: profile.username,
+          avatar: profile.avatar,
+          message: msg
         });
+        messageInput.value = '';
+      }
+    });
 
-        // Listen for typing status
-        socket.on('typing', (data) => {
-            typingIndicator.textContent = `${data.username} is typing...`;
-            typingIndicator.classList.remove('hidden');
-            setTimeout(() => typingIndicator.classList.add('hidden'), 2000);
-        });
+    messageInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendButton.click();
+    });
 
-        // Display messages from the server
-        socket.on('message', (data) => {
-            displayMessage(data);
-        });
+    profileButton.addEventListener('click', () => {
+      editUsername.value = profile.username;
+      editAvatar.value = profile.avatar;
+      modal.classList.remove('hidden');
+    });
 
-        sendButton.addEventListener('click', () => {
-            const message = messageInput.value.trim();
-            if (message) {
-                socket.emit('message', {
-                    channel: activeChannel,
-                    username: profile.username,
-                    avatar: profile.avatar,
-                    message
-                });
-                messageInput.value = '';
-            }
-        });
+    cancelBtn.addEventListener('click', () => {
+      modal.classList.add('hidden');
+    });
 
-        // Change active channel
-        channelList.addEventListener('click', (e) => {
-            const channel = e.target.dataset.channel;
-            if (channel) {
-                activeChannel = channel;
-                currentChannel.textContent = channel.charAt(0).toUpperCase() + channel.slice(1);
-                chatMessages.innerHTML = '';
-                socket.emit('getHistory', activeChannel);
-                socket.emit('joinChannel', activeChannel);
-            }
-        });
-    </script>
+    saveBtn.addEventListener('click', () => {
+      const newName = editUsername.value.trim();
+      const newAvatar = editAvatar.value.trim();
+      if (newName) {
+        profile.username = newName;
+        profile.avatar = newAvatar || '😎';
+        saveProfile();
+        modal.classList.add('hidden');
+      } else {
+        alert('Username is required.');
+      }
+    });
+  </script>
 </body>
 </html>
