@@ -1,204 +1,192 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>GlowChat</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GlowChat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Socket.IO client -->
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
 </head>
-<body class="bg-gray-900 text-white h-screen flex flex-col">
-
-  <!-- Top bar with toggle -->
-  <div class="flex items-center justify-between p-4 bg-gray-800">
-    <button id="toggle-sidebar" class="text-white text-xl">☰</button>
-    <h1 class="text-2xl font-bold">GlowChat</h1>
-    <button id="profile-button" class="text-sm bg-blue-600 px-3 py-1 rounded hover:bg-blue-700">Edit Profile</button>
-  </div>
-
-  <div class="flex flex-1 overflow-hidden">
+<body class="bg-gray-900 text-white flex h-screen">
 
     <!-- Sidebar -->
-    <aside id="sidebar" class="w-64 bg-gray-800 p-4 hidden md:block flex-shrink-0 overflow-y-auto">
-      <h2 class="text-lg font-semibold mb-2">Settings</h2>
-      <div class="mb-4">
-        <h3 class="font-semibold text-sm mb-1">Channels</h3>
-        <ul id="channel-list">
-          <li class="p-2 bg-gray-700 rounded cursor-pointer mb-1" data-channel="general"># General</li>
-          <li class="p-2 bg-gray-700 rounded cursor-pointer mb-1" data-channel="random"># Random</li>
-        </ul>
-      </div>
-
-      <div class="mb-4">
-        <h3 class="font-semibold text-sm mb-1">Active Users</h3>
-        <ul id="active-users" class="text-sm space-y-1"></ul>
-      </div>
-    </aside>
+    <div class="w-64 bg-gray-800 p-4 flex flex-col">
+        <h1 class="text-2xl font-bold mb-4">GlowChat</h1>
+        <div class="flex-1">
+            <h2 class="text-lg font-semibold">Channels</h2>
+            <ul id="channel-list" class="mt-2">
+                <li class="p-2 bg-gray-700 rounded cursor-pointer" data-channel="general">General</li>
+                <li class="p-2 bg-gray-700 rounded cursor-pointer" data-channel="random">Random</li>
+            </ul>
+        </div>
+        <div class="mt-auto">
+            <button id="profile-button" class="w-full p-2 bg-blue-600 rounded hover:bg-blue-700">Edit Profile</button>
+        </div>
+    </div>
 
     <!-- Chat Area -->
-    <main class="flex-1 flex flex-col">
-      <div class="p-4 border-b border-gray-700">
-        <h2 id="current-channel" class="text-xl font-semibold"># General</h2>
-      </div>
-      <div id="chat-messages" class="flex-1 p-4 overflow-y-auto space-y-2"></div>
-      <div id="typing-indicator" class="px-4 pb-1 text-sm text-gray-400 h-4"></div>
-      <div class="p-4 border-t border-gray-700">
-        <input id="message-input" type="text" class="w-full p-2 bg-gray-800 rounded text-white" placeholder="Type a message..." />
-        <button id="send-button" class="mt-2 p-2 bg-blue-600 rounded hover:bg-blue-700 w-full">Send</button>
-      </div>
-    </main>
-  </div>
-
-  <!-- Profile Modal -->
-  <div id="profile-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-10">
-    <div class="bg-gray-800 p-6 rounded-lg w-96">
-      <h2 class="text-xl font-semibold mb-4">Edit Profile</h2>
-      <label class="block mb-2">Username</label>
-      <input id="username-input" type="text" class="w-full p-2 bg-gray-700 rounded text-white mb-4" placeholder="Enter username" />
-      <label class="block mb-2">Avatar (Emoji or Image URL)</label>
-      <input id="avatar-input" type="text" class="w-full p-2 bg-gray-700 rounded text-white mb-4" placeholder="😎 or https://..." />
-      <div class="flex justify-end">
-        <button id="save-profile" class="p-2 bg-blue-600 rounded hover:bg-blue-700 mr-2">Save</button>
-        <button id="cancel-profile" class="p-2 bg-gray-600 rounded hover:bg-gray-500">Cancel</button>
-      </div>
+    <div class="flex-1 flex flex-col">
+        <div class="p-4 border-b border-gray-700">
+            <h2 id="current-channel" class="text-xl font-semibold">General</h2>
+        </div>
+        <div id="chat-messages" class="flex-1 p-4 overflow-y-auto"></div>
+        <div class="p-4 border-t border-gray-700">
+            <input id="message-input" type="text" class="w-full p-2 bg-gray-800 rounded text-white" placeholder="Type a message...">
+            <button id="send-button" class="mt-2 p-2 bg-blue-600 rounded hover:bg-blue-700">Send</button>
+        </div>
     </div>
-  </div>
 
-  <script>
-    const socket = io('https://glowchat-uaxw.onrender.com');
-    const chatMessages = document.getElementById('chat-messages');
-    const messageInput = document.getElementById('message-input');
-    const sendButton = document.getElementById('send-button');
-    const channelList = document.getElementById('channel-list');
-    const currentChannel = document.getElementById('current-channel');
-    const profileModal = document.getElementById('profile-modal');
-    const usernameInput = document.getElementById('username-input');
-    const avatarInput = document.getElementById('avatar-input');
-    const profileButton = document.getElementById('profile-button');
-    const saveProfile = document.getElementById('save-profile');
-    const cancelProfile = document.getElementById('cancel-profile');
-    const sidebar = document.getElementById('sidebar');
-    const toggleSidebar = document.getElementById('toggle-sidebar');
-    const activeUsersList = document.getElementById('active-users');
-    const typingIndicator = document.getElementById('typing-indicator');
+    <!-- Profile Modal -->
+    <div id="profile-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+        <div class="bg-gray-800 p-6 rounded-lg w-96">
+            <h2 class="text-xl font-semibold mb-4">Edit Profile</h2>
+            <label class="block mb-2">Username</label>
+            <input id="username-input" type="text" class="w-full p-2 bg-gray-700 rounded text-white mb-4" placeholder="Enter username">
+            <label class="block mb-2">Avatar (Emoji or Image URL)</label>
+            <input id="avatar-input" type="text" class="w-full p-2 bg-gray-700 rounded text-white mb-4" placeholder="e.g., 😎 or https://example.com/avatar.jpg">
+            <div class="flex justify-end">
+                <button id="save-profile" class="p-2 bg-blue-600 rounded hover:bg-blue-700 mr-2">Save</button>
+                <button id="cancel-profile" class="p-2 bg-gray-600 rounded hover:bg-gray-500">Cancel</button>
+            </div>
+        </div>
+    </div>
 
-    let activeChannel = 'general';
-    let typingTimeout;
+    <script>
+        const socket = io('https://glowchat-uaxw.onrender.com');
+        const chatMessages = document.getElementById('chat-messages');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        const channelList = document.getElementById('channel-list');
+        const currentChannel = document.getElementById('current-channel');
+        const profileButton = document.getElementById('profile-button');
+        const profileModal = document.getElementById('profile-modal');
+        const usernameInput = document.getElementById('username-input');
+        const avatarInput = document.getElementById('avatar-input');
+        const saveProfile = document.getElementById('save-profile');
+        const cancelProfile = document.getElementById('cancel-profile');
 
-    let profile = JSON.parse(localStorage.getItem('profile')) || {
-      username: 'User' + Math.floor(Math.random() * 1000),
-      avatar: '😎'
-    };
+        let activeChannel = 'general';
+        let profile = JSON.parse(localStorage.getItem('profile')) || { username: 'User' + Math.floor(Math.random() * 1000), avatar: '😎' };
 
-    function updateProfile() {
-      localStorage.setItem('profile', JSON.stringify(profile));
-    }
+        // Register user with username and avatar
+        socket.emit('registerUser', { username: profile.username, avatar: profile.avatar });
 
-    function displayMessage({ username, avatar, message }) {
-      const el = document.createElement('div');
-      el.className = 'p-2 bg-gray-800 rounded flex items-start gap-2';
-      const avatarHTML = /^https?:\/\//.test(avatar)
-        ? `<img src="${avatar}" class="w-8 h-8 rounded-full" alt="avatar"/>`
-        : `<span class="text-2xl">${avatar}</span>`;
-      el.innerHTML = `${avatarHTML}<div><strong>${username}</strong><br/>${message}</div>`;
-      chatMessages.appendChild(el);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
+        function displayMessage({ id, username, avatar, message }) {
+            const isOwn = username === profile.username;
+            const el = document.createElement('div');
+            el.className = 'p-2 bg-gray-800 rounded flex justify-between items-start';
+            el.dataset.id = id;
 
-    function showTyping(username) {
-      typingIndicator.textContent = `${username} is typing...`;
-      clearTimeout(typingTimeout);
-      typingTimeout = setTimeout(() => typingIndicator.textContent = '', 2000);
-    }
+            const avatarHTML = /^https?:\/\//.test(avatar)
+                ? `<img src="${avatar}" class="w-8 h-8 rounded-full" alt="avatar"/>`
+                : `<span class="text-2xl">${avatar}</span>`;
 
-    function updateActiveUsers(users) {
-      activeUsersList.innerHTML = '';
-      users.forEach(u => {
-        const li = document.createElement('li');
-        li.textContent = `${u.avatar} ${u.username}`;
-        activeUsersList.appendChild(li);
-      });
-    }
+            const controls = isOwn
+                ? `<div class="text-sm text-gray-400 space-x-2 ml-2">
+                     <button onclick="editMessage('${id}')" class="hover:underline">✏️</button>
+                     <button onclick="deleteMessage('${id}')" class="hover:underline">🗑️</button>
+                   </div>`
+                : '';
 
-    // Register user
-    socket.on('connect', () => {
-      socket.emit('registerUser', profile);
-      socket.emit('joinChannel', activeChannel);
-      socket.emit('getHistory', activeChannel);
-    });
+            el.innerHTML = `
+                <div class="flex items-start gap-2">
+                    ${avatarHTML}
+                    <div>
+                        <strong>${username}</strong><br/>
+                        <span class="message-content">${message}</span>
+                    </div>
+                </div>
+                ${controls}
+            `;
+            chatMessages.appendChild(el);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
 
-    socket.on('message', displayMessage);
+        function editMessage(id) {
+            const msgDiv = document.querySelector(`[data-id="${id}"] .message-content`);
+            const current = msgDiv.textContent;
+            const input = prompt("Edit your message:", current);
+            if (input !== null && input.trim() !== '') {
+                socket.emit('editMessage', { id, newMessage: input });
+            }
+        }
 
-    socket.on('messageHistory', (messages) => {
-      chatMessages.innerHTML = '';
-      messages.forEach(displayMessage);
-    });
+        function deleteMessage(id) {
+            if (confirm("Delete this message?")) {
+                socket.emit('deleteMessage', id);
+            }
+        }
 
-    socket.on('typing', showTyping);
-
-    socket.on('activeUsers', updateActiveUsers);
-
-    sendButton.addEventListener('click', () => {
-      const message = messageInput.value.trim();
-      if (message) {
-        socket.emit('message', {
-          channel: activeChannel,
-          username: profile.username,
-          avatar: profile.avatar,
-          message
+        socket.on('message', (data) => {
+            displayMessage(data);
         });
-        messageInput.value = '';
-      }
-    });
 
-    messageInput.addEventListener('input', () => {
-      socket.emit('typing', { channel: activeChannel, username: profile.username });
-    });
+        socket.on('messageEdited', ({ id, newMessage }) => {
+            const msg = document.querySelector(`[data-id="${id}"] .message-content`);
+            if (msg) msg.textContent = newMessage + ' (edited)';
+        });
 
-    messageInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') sendButton.click();
-    });
+        socket.on('messageDeleted', (id) => {
+            const msg = document.querySelector(`[data-id="${id}"]`);
+            if (msg) msg.remove();
+        });
 
-    toggleSidebar.addEventListener('click', () => {
-      sidebar.classList.toggle('hidden');
-    });
+        sendButton.addEventListener('click', () => {
+            const message = messageInput.value.trim();
+            if (message) {
+                const payload = {
+                    channel: activeChannel,
+                    username: profile.username,
+                    avatar: profile.avatar,
+                    message
+                };
+                socket.emit('message', payload);
+                messageInput.value = '';
+            }
+        });
 
-    channelList.addEventListener('click', (e) => {
-      const channel = e.target.dataset.channel;
-      if (channel) {
-        activeChannel = channel;
-        currentChannel.textContent = '#' + channel;
-        chatMessages.innerHTML = '';
-        socket.emit('joinChannel', activeChannel);
-        socket.emit('getHistory', activeChannel);
-        document.querySelectorAll('#channel-list li').forEach(li => li.classList.remove('bg-gray-600'));
-        e.target.classList.add('bg-gray-600');
-      }
-    });
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendButton.click();
+            }
+        });
 
-    profileButton.addEventListener('click', () => {
-      usernameInput.value = profile.username;
-      avatarInput.value = profile.avatar;
-      profileModal.classList.remove('hidden');
-    });
+        channelList.addEventListener('click', (e) => {
+            const channel = e.target.dataset.channel;
+            if (channel) {
+                activeChannel = channel;
+                currentChannel.textContent = channel.charAt(0).toUpperCase() + channel.slice(1);
+                chatMessages.innerHTML = '';
+                socket.emit('getHistory', activeChannel);
+                document.querySelectorAll('#channel-list li').forEach(li => li.classList.remove('bg-gray-600'));
+                e.target.classList.add('bg-gray-600');
+            }
+        });
 
-    saveProfile.addEventListener('click', () => {
-      const newUsername = usernameInput.value.trim();
-      const newAvatar = avatarInput.value.trim();
-      if (newUsername) {
-        profile.username = newUsername;
-        profile.avatar = newAvatar || '😎';
-        updateProfile();
-        socket.emit('registerUser', profile);
-        profileModal.classList.add('hidden');
-      } else {
-        alert('Username is required!');
-      }
-    });
+        profileButton.addEventListener('click', () => {
+            usernameInput.value = profile.username;
+            avatarInput.value = profile.avatar;
+            profileModal.classList.remove('hidden');
+        });
 
-    cancelProfile.addEventListener('click', () => {
-      profileModal.classList.add('hidden');
-    });
-  </script>
+        saveProfile.addEventListener('click', () => {
+            const newUsername = usernameInput.value.trim();
+            const newAvatar = avatarInput.value.trim();
+            if (newUsername) {
+                profile.username = newUsername;
+                profile.avatar = newAvatar || '😎';
+                localStorage.setItem('profile', JSON.stringify(profile));
+                profileModal.classList.add('hidden');
+            } else {
+                alert('Username is required!');
+            }
+        });
+
+        cancelProfile.addEventListener('click', () => {
+            profileModal.classList.add('hidden');
+        });
+    </script>
+
 </body>
 </html>
