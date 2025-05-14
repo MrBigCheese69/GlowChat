@@ -47,62 +47,30 @@
         const currentChannel = document.getElementById('current-channel');
         const typingIndicator = document.getElementById('typing-indicator');
         const profileButton = document.getElementById('profile-button');
-        const profileModal = document.getElementById('profile-modal');
-        const usernameInput = document.getElementById('username-input');
-        const avatarInput = document.getElementById('avatar-input');
-        const saveProfile = document.getElementById('save-profile');
-        const cancelProfile = document.getElementById('cancel-profile');
 
         let activeChannel = 'general';
-        let profile = JSON.parse(localStorage.getItem('profile')) || { username: 'User' + Math.floor(Math.random() * 1000), avatar: '😎' };
+        let profile = { username: 'User' + Math.floor(Math.random() * 1000), avatar: '😎' };
 
-        // Register user with username and avatar
-        socket.emit('registerUser', { username: profile.username, avatar: profile.avatar });
+        // Register user and set up profile
+        socket.emit('joinChannel', activeChannel);
 
         function displayMessage({ id, username, avatar, message }) {
-            const isOwn = username === profile.username;
             const el = document.createElement('div');
-            el.className = 'p-2 bg-gray-800 rounded flex justify-between items-start';
+            el.className = 'p-2 bg-gray-800 rounded';
             el.dataset.id = id;
 
-            const avatarHTML = /^https?:\/\//.test(avatar)
-                ? `<img src="${avatar}" class="w-8 h-8 rounded-full" alt="avatar"/>`
-                : `<span class="text-2xl">${avatar}</span>`;
-
-            const controls = isOwn
-                ? `<div class="text-sm text-gray-400 space-x-2 ml-2">
-                     <button onclick="editMessage('${id}')" class="hover:underline">✏️</button>
-                     <button onclick="deleteMessage('${id}')" class="hover:underline">🗑️</button>
-                   </div>`
-                : '';
-
+            const avatarHTML = `<span class="text-2xl">${avatar}</span>`;
             el.innerHTML = `
                 <div class="flex items-start gap-2">
                     ${avatarHTML}
                     <div>
                         <strong>${username}</strong><br/>
-                        <span class="message-content">${message}</span>
+                        <span>${message}</span>
                     </div>
                 </div>
-                ${controls}
             `;
             chatMessages.appendChild(el);
             chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        function editMessage(id) {
-            const msgDiv = document.querySelector(`[data-id="${id}"] .message-content`);
-            const current = msgDiv.textContent;
-            const input = prompt("Edit your message:", current);
-            if (input !== null && input.trim() !== '') {
-                socket.emit('editMessage', { id, newMessage: input });
-            }
-        }
-
-        function deleteMessage(id) {
-            if (confirm("Delete this message?")) {
-                socket.emit('deleteMessage', id);
-            }
         }
 
         // Handle typing indicator
@@ -110,51 +78,32 @@
             socket.emit('typing', { channel: activeChannel, username: profile.username });
         });
 
-        // Listen for typing status from other users
+        // Listen for typing status
         socket.on('typing', (data) => {
             typingIndicator.textContent = `${data.username} is typing...`;
             typingIndicator.classList.remove('hidden');
-            clearTimeout(typingTimeout);
-            typingTimeout = setTimeout(() => typingIndicator.classList.add('hidden'), 3000);
+            setTimeout(() => typingIndicator.classList.add('hidden'), 2000);
         });
 
+        // Display messages from the server
         socket.on('message', (data) => {
             displayMessage(data);
         });
 
-        socket.on('messageEdited', ({ id, newMessage }) => {
-            const msg = document.querySelector(`[data-id="${id}"] .message-content`);
-            if (msg) msg.textContent = newMessage + ' (edited)';
-        });
-
-        socket.on('messageDeleted', (id) => {
-            const msg = document.querySelector(`[data-id="${id}"]`);
-            if (msg) msg.remove();
-        });
-
-        // Join a channel
-        socket.emit('joinChannel', activeChannel);
-
         sendButton.addEventListener('click', () => {
             const message = messageInput.value.trim();
             if (message) {
-                const payload = {
+                socket.emit('message', {
                     channel: activeChannel,
                     username: profile.username,
                     avatar: profile.avatar,
                     message
-                };
-                socket.emit('message', payload);
+                });
                 messageInput.value = '';
             }
         });
 
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                sendButton.click();
-            }
-        });
-
+        // Change active channel
         channelList.addEventListener('click', (e) => {
             const channel = e.target.dataset.channel;
             if (channel) {
@@ -163,31 +112,8 @@
                 chatMessages.innerHTML = '';
                 socket.emit('getHistory', activeChannel);
                 socket.emit('joinChannel', activeChannel);
-                document.querySelectorAll('#channel-list li').forEach(li => li.classList.remove('bg-gray-600'));
-                e.target.classList.add('bg-gray-600');
             }
         });
-
-        profileButton.addEventListener('click', () => {
-            usernameInput.value = profile.username;
-            avatarInput.value = profile.avatar;
-            profileModal.classList.remove('hidden');
-        });
-
-        saveProfile.addEventListener('click', () => {
-            const newUsername = usernameInput.value.trim();
-            const newAvatar = avatarInput.value.trim();
-            if (newUsername) {
-                profile.username = newUsername;
-                profile.avatar = newAvatar || '😎';
-                localStorage.setItem('profile', JSON.stringify(profile));
-                profileModal.classList.add('hidden');
-            } else {
-                alert('Username is required!');
-            }
-        });
-
-        cancelProfile.addEventListener('click', () => {
-            profileModal.classList.add('hidden');
-        });
-    </
+    </script>
+</body>
+</html>
