@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -12,7 +12,7 @@ import {
 import { useRouter } from 'next/navigation';
 
 import {
-  collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, doc, getDoc,
+  collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, doc, getDoc, setDoc,
 } from 'firebase/firestore';
 import { db } from '@/firebase';
 import { useAuth } from '@/hooks/useAuth';
@@ -46,6 +46,10 @@ interface User {
   avatar: string;
   status: 'online' | 'away' | 'busy' | 'offline';
   activity?: string;
+  // New property for voice indicator
+  isSpeaking?: boolean;
+  // New property to track if user is in a voice channel
+  currentVoiceChannelId?: string;
 }
 
 const servers: Server[] = [
@@ -72,19 +76,24 @@ const servers: Server[] = [
   },
 ];
 
-const users: User[] = [
+// Enhanced users data to include a placeholder for voice state
+const initialUsers: User[] = [
   {
     id: '1',
     name: 'Alex Chen',
     avatar: '/placeholder.svg?height=32&width=32',
     status: 'online',
     activity: 'Playing Valorant',
+    currentVoiceChannelId: null, // Track the voice channel they are in
+    isSpeaking: false,
   },
   {
     id: '2',
     name: 'Sarah Kim',
     avatar: '/placeholder.svg?height=32&width=32',
     status: 'online',
+    currentVoiceChannelId: null,
+    isSpeaking: false,
   },
   {
     id: '3',
@@ -92,6 +101,8 @@ const users: User[] = [
     avatar: '/placeholder.svg?height=32&width=32',
     status: 'away',
     activity: 'Away',
+    currentVoiceChannelId: null,
+    isSpeaking: false,
   },
   {
     id: '4',
@@ -99,12 +110,16 @@ const users: User[] = [
     avatar: '/placeholder.svg?height=32&width=32',
     status: 'busy',
     activity: 'In a meeting',
+    currentVoiceChannelId: null,
+    isSpeaking: false,
   },
   {
     id: '5',
     name: 'Tom Wilson',
     avatar: '/placeholder.svg?height=32&width=32',
     status: 'offline',
+    currentVoiceChannelId: null,
+    isSpeaking: false,
   },
 ];
 
@@ -119,12 +134,82 @@ export default function DiscordClone() {
 
   // Voice chat states & refs
   const [isInVoiceChannel, setIsInVoiceChannel] = useState(false);
+  const [currentVoiceChannelId, setCurrentVoiceChannelId] = useState<string | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  // (You can add more WebRTC peer connection state here for a real implementation)
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+
+  // State to simulate other users' voice activity (for demonstration)
+  const [voiceActiveUsers, setVoiceActiveUsers] = useState<Record<string, boolean>>({});
+  const [allUsers, setAllUsers] = useState<User[]>(initialUsers); // Use a state for users
 
   const router = useRouter();
 
+  // Function to update user's voice state in Firestore
+  const updateUserVoiceState = useCallback(async (userId: string, channelId: string | null, isSpeaking: boolean = false) => {
+    if (!userId) return;
+    try {
+      // In a real app, you'd update a dedicated voice state collection or user presence.
+      // For this example, we'll just update the local 'allUsers' state to simulate.
+      // If using Firestore, you'd do:
+      // await setDoc(doc(db, 'voice_states', userId), {
+      //   currentVoiceChannelId: channelId,
+      //   isSpeaking: isSpeaking,
+      //   lastUpdated: serverTimestamp()
+      // }, { merge: true });
+      setAllUsers(prevUsers => prevUsers.map(u =>
+        u.id === userId
+          ? { ...u, currentVoiceChannelId: channelId, isSpeaking: isSpeaking }
+          : u
+      ));
+    } catch (error) {
+      console.error("Error updating user voice state:", error);
+    }
+  }, []);
+
+  // Set up audio processing for voice indicators
+  useEffect(() => {
+    if (localStreamRef.current && isInVoiceChannel) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      sourceNodeRef.current = audioContextRef.current.createMediaStreamSource(localStreamRef.current);
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 256; // Smaller FFT size for quicker analysis
+      dataArrayRef.current = new Uint8Array(analyserRef.current.frequencyBinCount);
+
+      sourceNodeRef.current.connect(analyserRef.current);
+      // Connect to destination to hear yourself (or for WebRTC, to send to peers)
+      analyserRef.current.connect(audioContextRef.current.destination);
+
+      const detectVoiceActivity = () => {
+        if (analyserRef.current && dataArrayRef.current && authUser?.uid) {
+          analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+          const sum = dataArrayRef.current.reduce((a, b) => a + b, 0);
+          const average = sum / dataArrayRef.current.length;
+          const speakingThreshold = 10; // Adjust this value based on microphone sensitivity
+
+          const currentlySpeaking = average > speakingThreshold;
+          if (voiceActiveUsers[authUser.uid] !== currentlySpeaking) {
+            setVoiceActiveUsers(prev => ({ ...prev, [authUser.uid]: currentlySpeaking }));
+            updateUserVoiceState(authUser.uid, currentVoiceChannelId, currentlySpeaking);
+          }
+        }
+        requestAnimationFrame(detectVoiceActivity);
+      };
+
+      detectVoiceActivity();
+
+      return () => {
+        if (sourceNodeRef.current) sourceNodeRef.current.disconnect();
+        if (analyserRef.current) analyserRef.current.disconnect();
+        if (audioContextRef.current) audioContextRef.current.close();
+      };
+    }
+  }, [isInVoiceChannel, authUser?.uid, currentVoiceChannelId, voiceActiveUsers, updateUserVoiceState]);
+
+  // Handle text channel messages
   useEffect(() => {
     if (!selectedServer || !selectedChannel) return;
 
@@ -176,33 +261,99 @@ export default function DiscordClone() {
     fetchProfile();
   }, [authUser]);
 
-  // Function to join a voice channel (simplified WebRTC setup)
+  // Load persistent voice state from localStorage on initial load
+  useEffect(() => {
+    const savedVoiceState = localStorage.getItem('voiceState');
+    if (savedVoiceState && authUser) {
+      const { channelId, serverId } = JSON.parse(savedVoiceState);
+      const server = servers.find(s => s.id === serverId);
+      const channel = server?.channels.find(c => c.id === channelId && c.type === 'voice');
+      if (server && channel) {
+        setSelectedServer(server);
+        setSelectedChannel(channel);
+        joinVoiceChannel(channel.id);
+      }
+    }
+
+    // Simulate other users' voice state updates via Firestore listener
+    // In a real app, you'd listen to the 'voice_states' collection for all users
+    // For this example, we'll just update a couple of dummy users
+    const simulateOtherUsersVoice = setInterval(() => {
+      setAllUsers(prevUsers => prevUsers.map(u => {
+        // Example: Mike Johnson joins and leaves voice periodically
+        if (u.id === '3') {
+          const inVoice = Math.random() > 0.5;
+          return { ...u, currentVoiceChannelId: inVoice ? '4' : null, isSpeaking: inVoice && Math.random() > 0.3 };
+        }
+        // Example: Sarah Kim is sometimes speaking if in voice
+        if (u.id === '2' && u.currentVoiceChannelId === '4') {
+          return { ...u, isSpeaking: Math.random() > 0.5 };
+        }
+        return u;
+      }));
+    }, 3000); // Update every 3 seconds
+
+    return () => clearInterval(simulateOtherUsersVoice);
+  }, [authUser, updateUserVoiceState]);
+
+  // Auto-leave voice when switching channels
+  useEffect(() => {
+    if (isInVoiceChannel && selectedChannel.type === 'text') {
+      leaveVoiceChannel();
+    }
+  }, [selectedChannel, isInVoiceChannel]);
+
+
+  // Function to join a voice channel
   const joinVoiceChannel = async (channelId: string) => {
-    if (isInVoiceChannel) {
-      console.log('Already in a voice channel');
+    if (isInVoiceChannel && currentVoiceChannelId === channelId) {
+      console.log('Already in this voice channel');
       return;
     }
+    // Automatically leave current voice channel if already in one
+    if (isInVoiceChannel) {
+      leaveVoiceChannel();
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
 
-      // For demo, just play your own mic audio locally
       if (audioRef.current) {
         audioRef.current.srcObject = stream;
         audioRef.current.play();
       }
 
-      // TODO: Implement signaling to connect peers here (socket.io, WebRTC peer connections, etc)
-
       setIsInVoiceChannel(true);
+      setCurrentVoiceChannelId(channelId);
       console.log(`Joined voice channel ${channelId}`);
+
+      // Persist voice state
+      if (authUser) {
+        localStorage.setItem('voiceState', JSON.stringify({
+          userId: authUser.uid,
+          channelId: channelId,
+          serverId: selectedServer.id
+        }));
+        updateUserVoiceState(authUser.uid, channelId, false); // Not speaking initially
+      }
+
+      // TODO: Implement signaling to connect peers here (socket.io, WebRTC peer connections, etc)
+      // For demonstration, we'll just set a dummy user as speaking
+      if (authUser) {
+        setVoiceActiveUsers(prev => ({ ...prev, [authUser.uid]: false })); // Initialize self as not speaking
+      }
+
+
     } catch (err) {
       console.error('Error accessing microphone:', err);
+      setIsInVoiceChannel(false);
+      setCurrentVoiceChannelId(null);
     }
   };
 
   // Function to leave voice channel
-  const leaveVoiceChannel = () => {
+  const leaveVoiceChannel = useCallback(() => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
@@ -210,9 +361,29 @@ export default function DiscordClone() {
     if (audioRef.current) {
       audioRef.current.srcObject = null;
     }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+      analyserRef.current = null;
+      sourceNodeRef.current = null;
+      dataArrayRef.current = null;
+    }
+
     setIsInVoiceChannel(false);
+    setCurrentVoiceChannelId(null);
     console.log('Left voice channel');
-  };
+
+    // Remove persistent voice state
+    localStorage.removeItem('voiceState');
+    if (authUser) {
+      updateUserVoiceState(authUser.uid, null, false);
+      setVoiceActiveUsers(prev => {
+        const newState = { ...prev };
+        delete newState[authUser.uid];
+        return newState;
+      });
+    }
+  }, [authUser, updateUserVoiceState]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !currentUser) return;
@@ -273,7 +444,7 @@ export default function DiscordClone() {
               setSelectedServer(server);
               setSelectedChannel(server.channels[0]);
               setMessages([]);
-              leaveVoiceChannel(); // leave voice on server change
+              // Auto-leave voice is handled by useEffect for channel type change
             }}
             className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl transition-all duration-200 hover:rounded-xl ${
               selectedServer.id === server.id
@@ -308,7 +479,6 @@ export default function DiscordClone() {
                   key={channel.id}
                   onClick={() => {
                     setSelectedChannel(channel);
-                    leaveVoiceChannel();
                   }}
                   className={`w-full flex items-center space-x-2 px-2 py-1 rounded text-left hover:bg-gray-600 ${
                     selectedChannel.id === channel.id ? 'bg-gray-600 text-white' : 'text-gray-300'
@@ -318,31 +488,45 @@ export default function DiscordClone() {
                   <span>{channel.name}</span>
                 </button>
               ))}
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 py-1 mt-4">
+              Voice Channels
+            </div>
+            {selectedServer.channels
+              .filter((c) => c.type === 'voice')
+              .map((channel) => (
+                <button
+                  key={channel.id}
+                  onClick={() => {
+                    setSelectedChannel(channel);
+                    joinVoiceChannel(channel.id);
+                  }}
+                  className={`w-full flex items-center justify-between px-2 py-1 rounded text-left hover:bg-gray-600 ${
+                    selectedChannel.id === channel.id && isInVoiceChannel ? 'bg-gray-600 text-white' : 'text-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2">
+                    <Volume2 size={16} />
+                    <span>{channel.name}</span>
+                  </div>
 
-            {selectedServer.channels.some((c) => c.type === 'voice') && (
-              <>
-                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 py-1 mt-4">
-                  Voice Channels
-                </div>
-                {selectedServer.channels
-                  .filter((c) => c.type === 'voice')
-                  .map((channel) => (
-                    <button
-                      key={channel.id}
-                      onClick={() => {
-                        setSelectedChannel(channel);
-                        joinVoiceChannel(channel.id);
-                      }}
-                      className={`w-full flex items-center space-x-2 px-2 py-1 rounded text-left hover:bg-gray-600 ${
-                        selectedChannel.id === channel.id ? 'bg-gray-600 text-white' : 'text-gray-300'
-                      }`}
-                    >
-                      <Volume2 size={16} />
-                      <span>{channel.name}</span>
-                    </button>
-                  ))}
-              </>
-            )}
+                  {/* Voice indicators for other users & self */}
+                  <div className="flex -space-x-1 overflow-hidden">
+                    {allUsers
+                      .filter(user => user.currentVoiceChannelId === channel.id)
+                      .map(user => (
+                        <div key={user.id} className="relative">
+                          <Avatar className={`w-5 h-5 border-2 ${user.isSpeaking ? 'border-green-500' : 'border-transparent'}`}>
+                            <AvatarImage src={user.avatar || '/placeholder.svg'} />
+                            <AvatarFallback>{user.name[0] || 'U'}</AvatarFallback>
+                          </Avatar>
+                          {user.isSpeaking && (
+                            <span className="absolute top-0 right-0 block h-1.5 w-1.5 rounded-full ring-2 ring-gray-700 bg-green-500 animate-pulse" />
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </button>
+              ))}
           </div>
         </ScrollArea>
 
@@ -427,6 +611,28 @@ export default function DiscordClone() {
             </Button>
             {/* Hidden audio element to play mic audio locally */}
             <audio ref={audioRef} autoPlay muted className="hidden" />
+            <div className="mt-4 text-sm text-gray-500">
+              {/* This section would display other users in the voice channel with their speaking indicators */}
+              <p className="font-semibold text-white mb-2">Users in Voice Channel:</p>
+              <div className="flex flex-wrap justify-center gap-4">
+                {allUsers
+                  .filter(user => user.currentVoiceChannelId === selectedChannel.id)
+                  .map(user => (
+                    <div key={user.id} className="flex flex-col items-center">
+                      <div className="relative">
+                        <Avatar className={`w-12 h-12 border-4 ${user.isSpeaking ? 'border-green-500' : 'border-transparent'}`}>
+                          <AvatarImage src={user.avatar || '/placeholder.svg'} />
+                          <AvatarFallback>{user.name[0]}</AvatarFallback>
+                        </Avatar>
+                        {user.isSpeaking && (
+                          <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full ring-2 ring-gray-700 bg-green-500 animate-pulse" />
+                        )}
+                      </div>
+                      <span className="mt-2 text-white text-sm">{user.name}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -461,10 +667,10 @@ export default function DiscordClone() {
           {/* Online Users */}
           <div>
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-              Online — {users.filter((u) => u.status === 'online').length}
+              Online — {allUsers.filter((u) => u.status === 'online').length}
             </div>
             <div className="space-y-2">
-              {users
+              {allUsers
                 .filter((u) => u.status === 'online')
                 .map((user) => (
                   <div
@@ -487,6 +693,15 @@ export default function DiscordClone() {
                       {user.activity && (
                         <div className="text-xs text-gray-400 truncate">{user.activity}</div>
                       )}
+                      {user.currentVoiceChannelId && (
+                        <div className="text-xs text-gray-400 flex items-center">
+                          <Volume2 size={12} className="mr-1" />
+                          In voice: {selectedServer.channels.find(c => c.id === user.currentVoiceChannelId)?.name}
+                          {user.isSpeaking && (
+                            <span className="ml-1 block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -494,13 +709,13 @@ export default function DiscordClone() {
           </div>
 
           {/* Away Users */}
-          {users.some((u) => u.status === 'away' || u.status === 'busy') && (
+          {allUsers.some((u) => u.status === 'away' || u.status === 'busy') && (
             <div>
               <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                Away — {users.filter((u) => u.status === 'away' || u.status === 'busy').length}
+                Away — {allUsers.filter((u) => u.status === 'away' || u.status === 'busy').length}
               </div>
               <div className="space-y-2">
-                {users
+                {allUsers
                   .filter((u) => u.status === 'away' || u.status === 'busy')
                   .map((user) => (
                     <div
@@ -523,6 +738,15 @@ export default function DiscordClone() {
                         {user.activity && (
                           <div className="text-xs text-gray-400 truncate">{user.activity}</div>
                         )}
+                        {user.currentVoiceChannelId && (
+                          <div className="text-xs text-gray-400 flex items-center">
+                            <Volume2 size={12} className="mr-1" />
+                            In voice: {selectedServer.channels.find(c => c.id === user.currentVoiceChannelId)?.name}
+                            {user.isSpeaking && (
+                              <span className="ml-1 block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -531,13 +755,13 @@ export default function DiscordClone() {
           )}
 
           {/* Offline Users */}
-          {users.some((u) => u.status === 'offline') && (
+          {allUsers.some((u) => u.status === 'offline') && (
             <div>
               <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                Offline — {users.filter((u) => u.status === 'offline').length}
+                Offline — {allUsers.filter((u) => u.status === 'offline').length}
               </div>
               <div className="space-y-2">
-                {users
+                {allUsers
                   .filter((u) => u.status === 'offline')
                   .map((user) => (
                     <div
