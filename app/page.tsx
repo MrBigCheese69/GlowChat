@@ -206,8 +206,6 @@ export default function DiscordClone() {
     }
   };
 
-  // ... continue rendering UI below (unchanged)
-
   return (
     <div className="flex h-screen bg-gray-800 text-white">
       {/* Server Sidebar */}
@@ -279,7 +277,9 @@ export default function DiscordClone() {
         </ScrollArea>
 
       {/* User Panel */}
-      <div className="p-2 bg-gray-800 flex items-center space-x-2">
+        <div className="p-2 bg-gray-800 flex items-center space-x-2">
+                </div> {/* ✅ Close Channel Sidebar here */}
+
         <Avatar className="w-8 h-8">
           <AvatarImage src={currentUser?.avatarUrl || "/placeholder.svg"} />
           <AvatarFallback>{currentUser?.username?.[0] || "U"}</AvatarFallback>
@@ -303,7 +303,7 @@ export default function DiscordClone() {
         </div>
       </div>
 
-      -
+      
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
         {/* Chat Header */}
