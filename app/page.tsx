@@ -1,4 +1,3 @@
-// Your existing DiscordClone component file
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -10,7 +9,6 @@ import {
   Hash, Send, Smile, Plus, Settings, Mic,
   Headphones, Volume2, Users, Bell, Pin,
 } from 'lucide-react';
-// Import useRouter for navigation
 import { useRouter } from 'next/navigation';
 
 import {
@@ -119,37 +117,47 @@ export default function DiscordClone() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Initialize useRouter
+  // Voice chat states & refs
+  const [isInVoiceChannel, setIsInVoiceChannel] = useState(false);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  // (You can add more WebRTC peer connection state here for a real implementation)
+
   const router = useRouter();
 
   useEffect(() => {
     if (!selectedServer || !selectedChannel) return;
 
-    const messagesRef = collection(
-      db,
-      'servers',
-      selectedServer.id,
-      'channels',
-      selectedChannel.id,
-      'messages'
-    );
-    const q = query(messagesRef, orderBy('timestamp', 'asc'));
+    if (selectedChannel.type === 'text') {
+      const messagesRef = collection(
+        db,
+        'servers',
+        selectedServer.id,
+        'channels',
+        selectedChannel.id,
+        'messages'
+      );
+      const q = query(messagesRef, orderBy('timestamp', 'asc'));
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map((doc) => {
-        const data = doc.data();
-        return {
-          id: doc.id,
-          user: data.user,
-          avatar: data.avatar,
-          content: data.content,
-          timestamp: data.timestamp ? data.timestamp.toDate() : new Date(),
-        } as Message;
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const msgs = snapshot.docs.map((doc) => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            user: data.user,
+            avatar: data.avatar,
+            content: data.content,
+            timestamp: data.timestamp ? data.timestamp.toDate() : new Date(),
+          } as Message;
+        });
+        setMessages(msgs);
       });
-      setMessages(msgs);
-    });
 
-    return () => unsubscribe();
+      return () => unsubscribe();
+    } else {
+      // Clear messages if switching to voice channel
+      setMessages([]);
+    }
   }, [selectedServer, selectedChannel]);
 
   useEffect(() => {
@@ -167,6 +175,44 @@ export default function DiscordClone() {
     };
     fetchProfile();
   }, [authUser]);
+
+  // Function to join a voice channel (simplified WebRTC setup)
+  const joinVoiceChannel = async (channelId: string) => {
+    if (isInVoiceChannel) {
+      console.log('Already in a voice channel');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      localStreamRef.current = stream;
+
+      // For demo, just play your own mic audio locally
+      if (audioRef.current) {
+        audioRef.current.srcObject = stream;
+        audioRef.current.play();
+      }
+
+      // TODO: Implement signaling to connect peers here (socket.io, WebRTC peer connections, etc)
+
+      setIsInVoiceChannel(true);
+      console.log(`Joined voice channel ${channelId}`);
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+    }
+  };
+
+  // Function to leave voice channel
+  const leaveVoiceChannel = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+    }
+    if (audioRef.current) {
+      audioRef.current.srcObject = null;
+    }
+    setIsInVoiceChannel(false);
+    console.log('Left voice channel');
+  };
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !currentUser) return;
@@ -212,7 +258,6 @@ export default function DiscordClone() {
     }
   };
 
-  // Function to navigate to settings page
   const navigateToSettings = () => {
     router.push('/settings');
   };
@@ -225,12 +270,15 @@ export default function DiscordClone() {
           <button
             key={server.id}
             onClick={() => {
-              setSelectedServer(server)
-              setSelectedChannel(server.channels[0])
-              setMessages([]) // Reset messages on server change if you want
+              setSelectedServer(server);
+              setSelectedChannel(server.channels[0]);
+              setMessages([]);
+              leaveVoiceChannel(); // leave voice on server change
             }}
             className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl transition-all duration-200 hover:rounded-xl ${
-              selectedServer.id === server.id ? "bg-indigo-600 rounded-xl" : "bg-gray-700 hover:bg-indigo-600"
+              selectedServer.id === server.id
+                ? 'bg-indigo-600 rounded-xl'
+                : 'bg-gray-700 hover:bg-indigo-600'
             }`}
           >
             {server.avatar}
@@ -250,15 +298,20 @@ export default function DiscordClone() {
 
         <ScrollArea className="flex-1 p-2">
           <div className="space-y-1">
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 py-1">Text Channels</div>
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 py-1">
+              Text Channels
+            </div>
             {selectedServer.channels
-              .filter((c) => c.type === "text")
+              .filter((c) => c.type === 'text')
               .map((channel) => (
                 <button
                   key={channel.id}
-                  onClick={() => setSelectedChannel(channel)}
+                  onClick={() => {
+                    setSelectedChannel(channel);
+                    leaveVoiceChannel();
+                  }}
                   className={`w-full flex items-center space-x-2 px-2 py-1 rounded text-left hover:bg-gray-600 ${
-                    selectedChannel.id === channel.id ? "bg-gray-600 text-white" : "text-gray-300"
+                    selectedChannel.id === channel.id ? 'bg-gray-600 text-white' : 'text-gray-300'
                   }`}
                 >
                   <Hash size={16} />
@@ -266,17 +319,23 @@ export default function DiscordClone() {
                 </button>
               ))}
 
-            {selectedServer.channels.some((c) => c.type === "voice") && (
+            {selectedServer.channels.some((c) => c.type === 'voice') && (
               <>
                 <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 py-1 mt-4">
                   Voice Channels
                 </div>
                 {selectedServer.channels
-                  .filter((c) => c.type === "voice")
+                  .filter((c) => c.type === 'voice')
                   .map((channel) => (
                     <button
                       key={channel.id}
-                      className="w-full flex items-center space-x-2 px-2 py-1 rounded text-left hover:bg-gray-600 text-gray-300"
+                      onClick={() => {
+                        setSelectedChannel(channel);
+                        joinVoiceChannel(channel.id);
+                      }}
+                      className={`w-full flex items-center space-x-2 px-2 py-1 rounded text-left hover:bg-gray-600 ${
+                        selectedChannel.id === channel.id ? 'bg-gray-600 text-white' : 'text-gray-300'
+                      }`}
                     >
                       <Volume2 size={16} />
                       <span>{channel.name}</span>
@@ -287,16 +346,14 @@ export default function DiscordClone() {
           </div>
         </ScrollArea>
 
-        {/* User Panel (Moved inside Channel Sidebar to fix layout issue) */}
+        {/* User Panel */}
         <div className="p-2 bg-gray-800 flex items-center space-x-2">
           <Avatar className="w-8 h-8">
-            <AvatarImage src={currentUser?.avatarUrl || "/placeholder.svg"} />
-            <AvatarFallback>{currentUser?.username?.[0] || "U"}</AvatarFallback>
+            <AvatarImage src={currentUser?.avatarUrl || '/placeholder.svg'} />
+            <AvatarFallback>{currentUser?.username?.[0] || 'U'}</AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate">
-              {currentUser?.username || "Guest"}
-            </div>
+            <div className="text-sm font-medium truncate">{currentUser?.username || 'Guest'}</div>
             <div className="text-xs text-gray-400">#1234</div>
           </div>
           <div className="flex space-x-1">
@@ -306,14 +363,12 @@ export default function DiscordClone() {
             <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
               <Headphones size={16} />
             </Button>
-            {/* Attach the navigateToSettings function to the Settings button */}
             <Button variant="ghost" size="sm" className="w-8 h-8 p-0" onClick={navigateToSettings}>
               <Settings size={16} />
             </Button>
           </div>
         </div>
       </div>
-
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
@@ -339,65 +394,86 @@ export default function DiscordClone() {
         </div>
 
         {/* Messages */}
-        <ScrollArea className="flex-1 p-4">
-          <div className="space-y-4">
-            {messages.map((message) => (
-              <div key={message.id} className="flex space-x-3 hover:bg-gray-700/30 p-2 rounded">
-                <Avatar className="w-10 h-10">
-                  <AvatarImage src={message.avatar || "/placeholder.svg"} />
-                  <AvatarFallback>{message.user[0]}</AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline space-x-2">
-                    <span className="font-medium text-white">{message.user}</span>
-                    <span className="text-xs text-gray-400">{formatTime(message.timestamp)}</span>
+        {selectedChannel.type === 'text' ? (
+          <ScrollArea className="flex-1 p-4">
+            <div className="space-y-4">
+              {messages.map((message) => (
+                <div key={message.id} className="flex space-x-3 hover:bg-gray-700/30 p-2 rounded">
+                  <Avatar className="w-10 h-10">
+                    <AvatarImage src={message.avatar || '/placeholder.svg'} />
+                    <AvatarFallback>{message.user[0]}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline space-x-2">
+                      <span className="font-medium text-white">{message.user}</span>
+                      <span className="text-xs text-gray-400">{formatTime(message.timestamp)}</span>
+                    </div>
+                    <p className="text-gray-100 mt-1">{message.content}</p>
                   </div>
-                  <p className="text-gray-100 mt-1">{message.content}</p>
                 </div>
-              </div>
-            ))}
-            <div ref={messagesEndRef} />
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          </ScrollArea>
+        ) : (
+          <div className="flex-1 flex flex-col justify-center items-center text-gray-400">
+            <p>You are connected to voice channel: <strong>{selectedChannel.name}</strong></p>
+            <Button
+              onClick={leaveVoiceChannel}
+              variant="destructive"
+              className="mt-4 px-6"
+            >
+              Leave Voice Channel
+            </Button>
+            {/* Hidden audio element to play mic audio locally */}
+            <audio ref={audioRef} autoPlay muted className="hidden" />
           </div>
-        </ScrollArea>
+        )}
 
-        {/* Message Input */}
-        <div className="p-4">
-          <div className="flex items-center space-x-2 bg-gray-600 rounded-lg p-3">
-            <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
-              <Plus size={16} />
-            </Button>
-            <Input
-              value={newMessage}
-              onChange={(e) => setNewMessage(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder={`Message #${selectedChannel.name}`}
-              className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder-gray-400"
-            />
-            <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
-              <Smile size={16} />
-            </Button>
-            <Button onClick={handleSendMessage} variant="ghost" size="sm" className="w-8 h-8 p-0">
-              <Send size={16} />
-            </Button>
+        {/* Message Input (only for text channels) */}
+        {selectedChannel.type === 'text' && (
+          <div className="p-4">
+            <div className="flex items-center space-x-2 bg-gray-600 rounded-lg p-3">
+              <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
+                <Plus size={16} />
+              </Button>
+              <Input
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder={`Message #${selectedChannel.name}`}
+                className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder-gray-400"
+              />
+              <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
+                <Smile size={16} />
+              </Button>
+              <Button onClick={handleSendMessage} variant="ghost" size="sm" className="w-8 h-8 p-0">
+                <Send size={16} />
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Users Sidebar */}
       <div className="w-60 bg-gray-700 p-4">
         <div className="space-y-4">
+          {/* Online Users */}
           <div>
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-              Online — {users.filter((u) => u.status === "online").length}
+              Online — {users.filter((u) => u.status === 'online').length}
             </div>
             <div className="space-y-2">
               {users
-                .filter((u) => u.status === "online")
+                .filter((u) => u.status === 'online')
                 .map((user) => (
-                  <div key={user.id} className="flex items-center space-x-2 p-1 rounded hover:bg-gray-600">
+                  <div
+                    key={user.id}
+                    className="flex items-center space-x-2 p-1 rounded hover:bg-gray-600"
+                  >
                     <div className="relative">
                       <Avatar className="w-8 h-8">
-                        <AvatarImage src={user.avatar || "/placeholder.svg"} />
+                        <AvatarImage src={user.avatar || '/placeholder.svg'} />
                         <AvatarFallback>{user.name[0]}</AvatarFallback>
                       </Avatar>
                       <div
@@ -408,26 +484,32 @@ export default function DiscordClone() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-white truncate">{user.name}</div>
-                      {user.activity && <div className="text-xs text-gray-400 truncate">{user.activity}</div>}
+                      {user.activity && (
+                        <div className="text-xs text-gray-400 truncate">{user.activity}</div>
+                      )}
                     </div>
                   </div>
                 ))}
             </div>
           </div>
 
-          {users.some((u) => u.status !== "online" && u.status !== "offline") && (
+          {/* Away Users */}
+          {users.some((u) => u.status === 'away' || u.status === 'busy') && (
             <div>
               <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                Away — {users.filter((u) => u.status === "away" || u.status === "busy").length}
+                Away — {users.filter((u) => u.status === 'away' || u.status === 'busy').length}
               </div>
               <div className="space-y-2">
                 {users
-                  .filter((u) => u.status === "away" || u.status === "busy")
+                  .filter((u) => u.status === 'away' || u.status === 'busy')
                   .map((user) => (
-                    <div key={user.id} className="flex items-center space-x-2 p-1 rounded hover:bg-gray-600">
+                    <div
+                      key={user.id}
+                      className="flex items-center space-x-2 p-1 rounded hover:bg-gray-600"
+                    >
                       <div className="relative">
                         <Avatar className="w-8 h-8">
-                          <AvatarImage src={user.avatar || "/placeholder.svg"} />
+                          <AvatarImage src={user.avatar || '/placeholder.svg'} />
                           <AvatarFallback>{user.name[0]}</AvatarFallback>
                         </Avatar>
                         <div
@@ -438,7 +520,9 @@ export default function DiscordClone() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-gray-300 truncate">{user.name}</div>
-                        {user.activity && <div className="text-xs text-gray-400 truncate">{user.activity}</div>}
+                        {user.activity && (
+                          <div className="text-xs text-gray-400 truncate">{user.activity}</div>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -446,19 +530,23 @@ export default function DiscordClone() {
             </div>
           )}
 
-          {users.some((u) => u.status === "offline") && (
+          {/* Offline Users */}
+          {users.some((u) => u.status === 'offline') && (
             <div>
               <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                Offline — {users.filter((u) => u.status === "offline").length}
+                Offline — {users.filter((u) => u.status === 'offline').length}
               </div>
               <div className="space-y-2">
                 {users
-                  .filter((u) => u.status === "offline")
+                  .filter((u) => u.status === 'offline')
                   .map((user) => (
-                    <div key={user.id} className="flex items-center space-x-2 p-1 rounded hover:bg-gray-600 opacity-50">
+                    <div
+                      key={user.id}
+                      className="flex items-center space-x-2 p-1 rounded hover:bg-gray-600 opacity-50"
+                    >
                       <div className="relative">
                         <Avatar className="w-8 h-8">
-                          <AvatarImage src={user.avatar || "/placeholder.svg"} />
+                          <AvatarImage src={user.avatar || '/placeholder.svg'} />
                           <AvatarFallback>{user.name[0]}</AvatarFallback>
                         </Avatar>
                         <div
@@ -478,5 +566,5 @@ export default function DiscordClone() {
         </div>
       </div>
     </div>
-  )
+  );
 }
