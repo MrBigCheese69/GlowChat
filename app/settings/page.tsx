@@ -27,7 +27,11 @@ import {
   Speaker,
   Camera,
   ChevronRight,
+  ArrowLeft, // Added for the back button
 } from "lucide-react"
+
+// Import useRouter for navigation
+import { useRouter } from 'next/navigation';
 
 interface SettingsCategory {
   id: string
@@ -47,6 +51,8 @@ const settingsCategories: SettingsCategory[] = [
 ]
 
 export default function SettingsPage() {
+  const router = useRouter(); // Initialize useRouter
+
   const [activeCategory, setActiveCategory] = useState("profile")
   const [profileData, setProfileData] = useState({
     username: "YourUsername",
@@ -134,9 +140,16 @@ export default function SettingsPage() {
     try {
       // Request media stream to get device labels (permissions)
       // We don't necessarily need the stream itself, just the permission check
-      await navigator.mediaDevices.getUserMedia({ audio: true, video: true }).catch(() => {
+      // This is crucial for labels to appear, even if the stream is closed immediately.
+      const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true }).catch(() => {
         console.warn("Microphone and/or camera permission denied. Device names may not be available.")
-      })
+        return null; // Return null if permission denied
+      });
+
+      // Stop the temporary stream immediately after getting permissions
+      if (tempStream) {
+        tempStream.getTracks().forEach(track => track.stop());
+      }
 
       const devices = await navigator.mediaDevices.enumerateDevices()
 
@@ -149,15 +162,25 @@ export default function SettingsPage() {
       setCameraDevices(videoInput)
 
       // Set default selected devices if they were "default" and now specific devices are available
-      if (audioInput.length > 0 && audioSettings.inputDevice === "default") {
-        setAudioSettings(prev => ({ ...prev, inputDevice: audioInput[0].deviceId }));
-      }
-      if (audioOutput.length > 0 && audioSettings.outputDevice === "default") {
-        setAudioSettings(prev => ({ ...prev, outputDevice: audioOutput[0].deviceId }));
-      }
-      if (videoInput.length > 0 && audioSettings.cameraDevice === "default") {
-        setAudioSettings(prev => ({ ...prev, cameraDevice: videoInput[0].deviceId }));
-      }
+      setAudioSettings(prev => {
+        let updatedSettings = { ...prev };
+        if (audioInput.length > 0 && prev.inputDevice === "default") {
+          updatedSettings = { ...updatedSettings, inputDevice: audioInput[0].deviceId };
+        } else if (audioInput.length === 0 && prev.inputDevice !== "no-devices") {
+          updatedSettings = { ...updatedSettings, inputDevice: "no-devices" };
+        }
+        if (audioOutput.length > 0 && prev.outputDevice === "default") {
+          updatedSettings = { ...updatedSettings, outputDevice: audioOutput[0].deviceId };
+        } else if (audioOutput.length === 0 && prev.outputDevice !== "no-devices") {
+            updatedSettings = { ...updatedSettings, outputDevice: "no-devices" };
+        }
+        if (videoInput.length > 0 && prev.cameraDevice === "default") {
+          updatedSettings = { ...updatedSettings, cameraDevice: videoInput[0].deviceId };
+        } else if (videoInput.length === 0 && prev.cameraDevice !== "no-devices") {
+            updatedSettings = { ...updatedSettings, cameraDevice: "no-devices" };
+        }
+        return updatedSettings;
+      });
 
     } catch (err) {
       console.error("Error enumerating devices:", err)
@@ -169,16 +192,19 @@ export default function SettingsPage() {
   const startMicTest = async () => {
     // Ensure we're in the audio settings and an input device is selected
     if (activeCategory !== "audio" || audioSettings.inputDevice === "no-devices" || audioSettings.inputDevice === "default") {
-      console.warn("Cannot start mic test: Not in audio settings or no device selected.");
+      console.warn("Cannot start mic test: Not in audio settings or no specific device selected.");
+      alert("Please select a specific input device and grant microphone permissions to start the mic test.");
       return;
     }
 
-    // Stop any previously running test cleanly
+    // Stop any previously running test cleanly to ensure a fresh start
     stopMicTest();
 
     try {
-      // 1. Create (or get existing) AudioContext and AnalyserNode
-      if (!audioContextRef.current) {
+      // 1. Create a NEW AudioContext if one doesn't exist or was closed
+      // This is crucial: if audioContextRef.current is null, create a new one.
+      // Do NOT try to resume a closed context.
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
       const audioContext = audioContextRef.current;
@@ -201,12 +227,11 @@ export default function SettingsPage() {
           echoCancellation: audioSettings.echoCancellation,
           noiseSuppression: audioSettings.noiseSuppression,
           autoGainControl: audioSettings.autoGainControl, // Apply AGC constraint
-          // Volume constraint can also be applied here, but we'll apply it to the track for dynamic changes
         },
       });
       mediaStreamRef.current = stream;
 
-      // Apply initial volume based on settings
+      // Apply initial volume/sensitivity based on settings to the track
       const audioTrack = stream.getAudioTracks()[0];
       if (audioTrack) {
         const volumeValue = audioSettings.inputVolume[0] / 100; // Normalize to 0-1
@@ -214,16 +239,16 @@ export default function SettingsPage() {
 
         audioTrack.applyConstraints({
           volume: audioSettings.autoGainControl ? undefined : (volumeValue * sensitivityValue),
-          // If AGC is true, let it handle volume. Otherwise, apply combined manual volume/sensitivity.
         }).catch(e => console.error("Error applying volume constraints on start:", e));
       }
 
       // 3. Connect MediaStream to AnalyserNode
       const source = audioContext.createMediaStreamSource(stream);
       source.connect(analyser);
+      analyser.connect(audioContext.destination); // Connect analyser to speakers for monitoring
 
       // 4. Start analysis loop
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const dataArray = new Uint8Array(analyser.frequencyBinBinCount);
       const updateMicLevel = () => {
         analyser.getByteFrequencyData(dataArray);
         let sum = 0;
@@ -243,24 +268,32 @@ export default function SettingsPage() {
       console.error("Error starting mic test:", err);
       setMicLevel(0); // Reset level on error
       setIsMicTestRunning(false); // Ensure test state is off
-      alert("Could not start microphone test. Please ensure microphone permissions are granted and a device is selected.");
+      alert("Could not start microphone test. Please ensure microphone permissions are granted and a device is selected. Error: " + (err as Error).message);
     }
   };
 
   const stopMicTest = () => {
+    console.log("Stopping mic test...");
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
     if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
+      mediaStreamRef.current.getTracks().forEach(track => {
+        console.log("Stopping track:", track.kind);
+        track.stop(); // Stop all tracks
+      });
+      mediaStreamRef.current = null; // Clear the ref
     }
     // Only close AudioContext if it exists and is not already closed
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().then(() => {
-        audioContextRef.current = null;
-      }).catch(e => console.error("Error closing AudioContext:", e));
+      console.log("Closing AudioContext.");
+      audioContextRef.current.close()
+        .then(() => {
+          audioContextRef.current = null; // IMPORTANT: Clear the ref after closing
+        }).catch(e => console.error("Error closing AudioContext:", e));
+    } else {
+        audioContextRef.current = null; // Ensure ref is null even if already closed or never existed
     }
     setMicLevel(0);
     setIsMicTestRunning(false); // Set test to stopped
@@ -281,11 +314,16 @@ export default function SettingsPage() {
   // Effect to stop mic test when category changes away from audio
   useEffect(() => {
     if (activeCategory !== "audio" && isMicTestRunning) {
+      console.log("Category changed, stopping mic test.");
       stopMicTest();
+    }
+    // Re-enumerate devices when category changes to 'audio' to catch any new devices
+    if (activeCategory === "audio") {
+        getMediaDevices();
     }
   }, [activeCategory, isMicTestRunning]);
 
-  // New Effect: Apply constraints when slider values or audio settings change
+  // Effect: Apply constraints when slider values or audio settings change
   useEffect(() => {
     if (isMicTestRunning && mediaStreamRef.current) {
       const audioTrack = mediaStreamRef.current.getAudioTracks()[0];
@@ -300,9 +338,16 @@ export default function SettingsPage() {
         };
 
         // Only apply volume constraint if autoGainControl is false
+        // Otherwise, native AGC tries to handle it.
         if (!audioSettings.autoGainControl) {
+            // Apply a combined effect of inputVolume and micSensitivity
             constraints.volume = volumeValue * sensitivityValue;
+        } else {
+            // If AGC is true, explicitly remove the volume constraint if it was previously set,
+            // or ensure it's not present for AGC to work unimpeded.
+            constraints.volume = undefined;
         }
+
 
         audioTrack.applyConstraints(constraints)
           .catch(e => console.error("Error applying media track constraints:", e));
@@ -357,6 +402,11 @@ export default function SettingsPage() {
   const handleResetToDefault = () => {
     const confirmed = confirm("Are you sure you want to reset all settings to their default values?")
     if (confirmed) {
+      // It's a good idea to stop the mic test if resetting audio settings
+      if (isMicTestRunning) {
+        stopMicTest();
+      }
+
       setProfileData({
         username: "YourUsername",
         displayName: "Your Display Name",
@@ -372,7 +422,7 @@ export default function SettingsPage() {
         noiseSuppression: true,
         echoCancellation: true,
         autoGainControl: true,
-        inputDevice: "default",
+        inputDevice: "default", // Reset to default will trigger re-selection on next audio category visit
         outputDevice: "default",
         cameraDevice: "default",
       })
@@ -415,10 +465,16 @@ export default function SettingsPage() {
         developerMode: false,
       })
       alert("All settings have been reset to default values.")
+      // Re-enumerate devices after reset to pick up new defaults
+      getMediaDevices();
     }
   }
 
   const handleSaveChanges = () => {
+    // Stop mic test when saving settings, as the audio pipeline might need to be re-initialized
+    // on a full application usage after settings are persisted.
+    stopMicTest();
+
     const currentSettings = {
       profileData,
       audioSettings,
@@ -599,11 +655,12 @@ export default function SettingsPage() {
               max={100}
               step={1}
               className="w-full"
-              disabled={!isMicTestRunning || !audioSettings.autoGainControl} // Disable if AGC is off, as sensitivity takes over
+              // Only disable if AGC is OFF, otherwise it still affects output *before* AGC
+              disabled={!isMicTestRunning || !audioSettings.autoGainControl}
             />
              {!audioSettings.autoGainControl && (
                 <p className="text-sm text-gray-400">
-                    Input Volume is controlled by Microphone Sensitivity when Automatic Gain Control is off.
+                    This slider affects the raw audio signal before Automatic Gain Control processes it.
                 </p>
             )}
           </div>
@@ -1138,6 +1195,18 @@ export default function SettingsPage() {
       <div className="flex">
         {/* Settings Sidebar */}
         <div className="w-80 bg-gray-800 min-h-screen p-4">
+          {/* Back button at the top of the sidebar */}
+          <div className="mb-4">
+            <Button
+              variant="ghost"
+              className="w-full justify-start text-gray-300 hover:text-white hover:bg-gray-700"
+              onClick={() => router.push('/')}
+            >
+              <ArrowLeft size={18} className="mr-2" />
+              Back to Main Page
+            </Button>
+          </div>
+
           <div className="mb-6">
             <h1 className="text-xl font-bold mb-2">Settings</h1>
             <p className="text-sm text-gray-400">Customize your experience</p>
