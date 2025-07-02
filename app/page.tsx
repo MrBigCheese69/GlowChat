@@ -1,181 +1,212 @@
-"use client"
+'use client';
 
-import React, { useState, useRef, useEffect } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import React, { useState, useRef, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
-  Hash,
-  Send,
-  Smile,
-  Plus,
-  Settings,
-  Mic,
-  Headphones,
-  Volume2,
-  Users,
-  Bell,
-  Pin,
-} from "lucide-react"
+  Hash, Send, Smile, Plus, Settings, Mic,
+  Headphones, Volume2, Users, Bell, Pin,
+} from 'lucide-react';
 
 import {
-  collection,
-  addDoc,
-  serverTimestamp,
-  onSnapshot,
-  query,
-  orderBy,
-} from "firebase/firestore"
-import { db } from "@/firebase" // adjust this path if needed
+  collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, doc, getDoc,
+} from 'firebase/firestore';
+import { db } from '@/firebase';
+import { useAuth } from '@/hooks/useAuth';
+import { UserProfile } from '@/types';
 
 interface Message {
-  id: string
-  user: string
-  avatar: string
-  content: string
-  timestamp: Date
-  type?: "message" | "system"
+  id: string;
+  user: string;
+  avatar: string;
+  content: string;
+  timestamp: Date;
+  type?: 'message' | 'system';
 }
 
 interface Channel {
-  id: string
-  name: string
-  type: "text" | "voice"
+  id: string;
+  name: string;
+  type: 'text' | 'voice';
 }
 
 interface Server {
-  id: string
-  name: string
-  avatar: string
-  channels: Channel[]
+  id: string;
+  name: string;
+  avatar: string;
+  channels: Channel[];
 }
 
 interface User {
-  id: string
-  name: string
-  avatar: string
-  status: "online" | "away" | "busy" | "offline"
-  activity?: string
+  id: string;
+  name: string;
+  avatar: string;
+  status: 'online' | 'away' | 'busy' | 'offline';
+  activity?: string;
 }
 
 const servers: Server[] = [
   {
-    id: "1",
-    name: "Gaming Hub",
-    avatar: "🎮",
+    id: '1',
+    name: 'Gaming Hub',
+    avatar: '🎮',
     channels: [
-      { id: "1", name: "general", type: "text" },
-      { id: "2", name: "gaming", type: "text" },
-      { id: "3", name: "memes", type: "text" },
-      { id: "4", name: "General Voice", type: "voice" },
+      { id: '1', name: 'general', type: 'text' },
+      { id: '2', name: 'gaming', type: 'text' },
+      { id: '3', name: 'memes', type: 'text' },
+      { id: '4', name: 'General Voice', type: 'voice' },
     ],
   },
   {
-    id: "2",
-    name: "Dev Community",
-    avatar: "💻",
+    id: '2',
+    name: 'Dev Community',
+    avatar: '💻',
     channels: [
-      { id: "5", name: "general", type: "text" },
-      { id: "6", name: "help", type: "text" },
-      { id: "7", name: "showcase", type: "text" },
+      { id: '5', name: 'general', type: 'text' },
+      { id: '6', name: 'help', type: 'text' },
+      { id: '7', name: 'showcase', type: 'text' },
     ],
   },
-]
+];
 
 const users: User[] = [
   {
-    id: "1",
-    name: "Alex Chen",
-    avatar: "/placeholder.svg?height=32&width=32",
-    status: "online",
-    activity: "Playing Valorant",
+    id: '1',
+    name: 'Alex Chen',
+    avatar: '/placeholder.svg?height=32&width=32',
+    status: 'online',
+    activity: 'Playing Valorant',
   },
-  { id: "2", name: "Sarah Kim", avatar: "/placeholder.svg?height=32&width=32", status: "online" },
-  { id: "3", name: "Mike Johnson", avatar: "/placeholder.svg?height=32&width=32", status: "away", activity: "Away" },
   {
-    id: "4",
-    name: "Emma Davis",
-    avatar: "/placeholder.svg?height=32&width=32",
-    status: "busy",
-    activity: "In a meeting",
+    id: '2',
+    name: 'Sarah Kim',
+    avatar: '/placeholder.svg?height=32&width=32',
+    status: 'online',
   },
-  { id: "5", name: "Tom Wilson", avatar: "/placeholder.svg?height=32&width=32", status: "offline" },
-]
+  {
+    id: '3',
+    name: 'Mike Johnson',
+    avatar: '/placeholder.svg?height=32&width=32',
+    status: 'away',
+    activity: 'Away',
+  },
+  {
+    id: '4',
+    name: 'Emma Davis',
+    avatar: '/placeholder.svg?height=32&width=32',
+    status: 'busy',
+    activity: 'In a meeting',
+  },
+  {
+    id: '5',
+    name: 'Tom Wilson',
+    avatar: '/placeholder.svg?height=32&width=32',
+    status: 'offline',
+  },
+];
 
 export default function DiscordClone() {
-  const [selectedServer, setSelectedServer] = useState(servers[0])
-  const [selectedChannel, setSelectedChannel] = useState(servers[0].channels[0])
-  const [messages, setMessages] = useState<Message[]>([])
-  const [newMessage, setNewMessage] = useState("")
-  const [currentUser] = useState({ name: "You", avatar: "/placeholder.svg?height=40&width=40" })
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [selectedServer, setSelectedServer] = useState(servers[0]);
+  const [selectedChannel, setSelectedChannel] = useState(servers[0].channels[0]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const { user: authUser } = useAuth();
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!selectedServer || !selectedChannel) return
+    if (!selectedServer || !selectedChannel) return;
 
-    // Firestore path: servers/{serverId}/channels/{channelId}/messages
-    const messagesRef = collection(db, "servers", selectedServer.id, "channels", selectedChannel.id, "messages")
-    const q = query(messagesRef, orderBy("timestamp", "asc"))
+    const messagesRef = collection(
+      db,
+      'servers',
+      selectedServer.id,
+      'channels',
+      selectedChannel.id,
+      'messages'
+    );
+    const q = query(messagesRef, orderBy('timestamp', 'asc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const msgs = snapshot.docs.map((doc) => {
-        const data = doc.data()
+        const data = doc.data();
         return {
           id: doc.id,
           user: data.user,
           avatar: data.avatar,
           content: data.content,
           timestamp: data.timestamp ? data.timestamp.toDate() : new Date(),
-        } as Message
-      })
-      setMessages(msgs)
-    })
+        } as Message;
+      });
+      setMessages(msgs);
+    });
 
-    return () => unsubscribe()
-  }, [selectedServer, selectedChannel])
+    return () => unsubscribe();
+  }, [selectedServer, selectedChannel]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!authUser) return;
+      const ref = doc(db, 'users', authUser.uid);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        setCurrentUser(snap.data() as UserProfile);
+      }
+    };
+    fetchProfile();
+  }, [authUser]);
 
   const handleSendMessage = async () => {
-    if (!newMessage.trim()) return
+    if (!newMessage.trim() || !currentUser) return;
 
-    const messagesRef = collection(db, "servers", selectedServer.id, "channels", selectedChannel.id, "messages")
+    const messagesRef = collection(
+      db,
+      'servers',
+      selectedServer.id,
+      'channels',
+      selectedChannel.id,
+      'messages'
+    );
     await addDoc(messagesRef, {
-      user: currentUser.name,
-      avatar: currentUser.avatar,
+      user: currentUser.username || 'Unknown',
+      avatar: currentUser.avatarUrl || '/placeholder.svg',
       content: newMessage,
       timestamp: serverTimestamp(),
-    })
+    });
 
-    setNewMessage("")
-  }
+    setNewMessage('');
+  };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleSendMessage()
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
     }
-  }
+  };
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  }
+  const formatTime = (date: Date) =>
+    date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "online":
-        return "bg-green-500"
-      case "away":
-        return "bg-yellow-500"
-      case "busy":
-        return "bg-red-500"
+      case 'online':
+        return 'bg-green-500';
+      case 'away':
+        return 'bg-yellow-500';
+      case 'busy':
+        return 'bg-red-500';
       default:
-        return "bg-gray-500"
+        return 'bg-gray-500';
     }
-  }
+  };
+
+  // ... continue rendering UI below (unchanged)
 
   return (
     <div className="flex h-screen bg-gray-800 text-white">
@@ -187,6 +218,7 @@ export default function DiscordClone() {
             onClick={() => {
               setSelectedServer(server)
               setSelectedChannel(server.channels[0])
+              setMessages([]) // Reset messages on server change if you want
             }}
             className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl transition-all duration-200 hover:rounded-xl ${
               selectedServer.id === server.id ? "bg-indigo-600 rounded-xl" : "bg-gray-700 hover:bg-indigo-600"
@@ -246,30 +278,32 @@ export default function DiscordClone() {
           </div>
         </ScrollArea>
 
-        {/* User Panel */}
-        <div className="p-2 bg-gray-800 flex items-center space-x-2">
-          <Avatar className="w-8 h-8">
-            <AvatarImage src={currentUser.avatar || "/placeholder.svg"} />
-            <AvatarFallback>You</AvatarFallback>
-          </Avatar>
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium truncate">{currentUser.name}</div>
-            <div className="text-xs text-gray-400">#1234</div>
+      {/* User Panel */}
+      <div className="p-2 bg-gray-800 flex items-center space-x-2">
+        <Avatar className="w-8 h-8">
+          <AvatarImage src={currentUser?.avatarUrl || "/placeholder.svg"} />
+          <AvatarFallback>{currentUser?.username?.[0] || "U"}</AvatarFallback>
+        </Avatar>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium truncate">
+            {currentUser?.username || "Guest"}
           </div>
-          <div className="flex space-x-1">
-            <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
-              <Mic size={16} />
-            </Button>
-            <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
-              <Headphones size={16} />
-            </Button>
-            <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
-              <Settings size={16} />
-            </Button>
-          </div>
+          <div className="text-xs text-gray-400">#1234</div>
+        </div>
+        <div className="flex space-x-1">
+          <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
+            <Mic size={16} />
+          </Button>
+          <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
+            <Headphones size={16} />
+          </Button>
+          <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
+            <Settings size={16} />
+          </Button>
         </div>
       </div>
 
+      -
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
         {/* Chat Header */}
@@ -410,16 +444,20 @@ export default function DiscordClone() {
                 {users
                   .filter((u) => u.status === "offline")
                   .map((user) => (
-                    <div key={user.id} className="flex items-center space-x-2 p-1 rounded hover:bg-gray-600">
+                    <div key={user.id} className="flex items-center space-x-2 p-1 rounded hover:bg-gray-600 opacity-50">
                       <div className="relative">
-                        <Avatar className="w-8 h-8 opacity-50">
+                        <Avatar className="w-8 h-8">
                           <AvatarImage src={user.avatar || "/placeholder.svg"} />
                           <AvatarFallback>{user.name[0]}</AvatarFallback>
                         </Avatar>
-                        <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-gray-700 bg-gray-500"></div>
+                        <div
+                          className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-gray-700 ${getStatusColor(
+                            user.status
+                          )}`}
+                        ></div>
                       </div>
-                      <div className="flex-1 min-w-0 opacity-50">
-                        <div className="text-sm font-medium truncate">{user.name}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-gray-400 truncate">{user.name}</div>
                       </div>
                     </div>
                   ))}
