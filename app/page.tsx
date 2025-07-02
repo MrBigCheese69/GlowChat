@@ -1,3 +1,4 @@
+// Your existing DiscordClone component file
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -9,6 +10,8 @@ import {
   Hash, Send, Smile, Plus, Settings, Mic,
   Headphones, Volume2, Users, Bell, Pin,
 } from 'lucide-react';
+// Import useRouter for navigation
+import { useRouter } from 'next/navigation';
 
 import {
   collection, addDoc, serverTimestamp, onSnapshot, query, orderBy, doc, getDoc,
@@ -116,6 +119,9 @@ export default function DiscordClone() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Initialize useRouter
+  const router = useRouter();
+
   useEffect(() => {
     if (!selectedServer || !selectedChannel) return;
 
@@ -206,6 +212,11 @@ export default function DiscordClone() {
     }
   };
 
+  // Function to navigate to settings page
+  const navigateToSettings = () => {
+    router.push('/settings');
+  };
+
   return (
     <div className="flex h-screen bg-gray-800 text-white">
       {/* Server Sidebar */}
@@ -276,34 +287,34 @@ export default function DiscordClone() {
           </div>
         </ScrollArea>
 
-      {/* User Panel */}
+        {/* User Panel (Moved inside Channel Sidebar to fix layout issue) */}
         <div className="p-2 bg-gray-800 flex items-center space-x-2">
-                </div> {/* ✅ Close Channel Sidebar here */}
-
-        <Avatar className="w-8 h-8">
-          <AvatarImage src={currentUser?.avatarUrl || "/placeholder.svg"} />
-          <AvatarFallback>{currentUser?.username?.[0] || "U"}</AvatarFallback>
-        </Avatar>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium truncate">
-            {currentUser?.username || "Guest"}
+          <Avatar className="w-8 h-8">
+            <AvatarImage src={currentUser?.avatarUrl || "/placeholder.svg"} />
+            <AvatarFallback>{currentUser?.username?.[0] || "U"}</AvatarFallback>
+          </Avatar>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium truncate">
+              {currentUser?.username || "Guest"}
+            </div>
+            <div className="text-xs text-gray-400">#1234</div>
           </div>
-          <div className="text-xs text-gray-400">#1234</div>
-        </div>
-        <div className="flex space-x-1">
-          <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
-            <Mic size={16} />
-          </Button>
-          <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
-            <Headphones size={16} />
-          </Button>
-          <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
-            <Settings size={16} />
-          </Button>
+          <div className="flex space-x-1">
+            <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
+              <Mic size={16} />
+            </Button>
+            <Button variant="ghost" size="sm" className="w-8 h-8 p-0">
+              <Headphones size={16} />
+            </Button>
+            {/* Attach the navigateToSettings function to the Settings button */}
+            <Button variant="ghost" size="sm" className="w-8 h-8 p-0" onClick={navigateToSettings}>
+              <Settings size={16} />
+            </Button>
+          </div>
         </div>
       </div>
 
-      
+
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
         {/* Chat Header */}
