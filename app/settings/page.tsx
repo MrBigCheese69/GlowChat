@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react" // Added useCallback
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -27,10 +27,11 @@ import {
   Speaker,
   Camera,
   ChevronRight,
-  ArrowLeft, // Added for the back button
+  ArrowLeft,
+  Headphones, // Added for voice channels
+  Volume2, // Added for remote audio
 } from "lucide-react"
 
-// Import useRouter for navigation
 import { useRouter } from 'next/navigation';
 
 interface SettingsCategory {
@@ -43,6 +44,7 @@ interface SettingsCategory {
 const settingsCategories: SettingsCategory[] = [
   { id: "profile", name: "My Account", icon: <User size={20} />, description: "Profile and account settings" },
   { id: "audio", name: "Voice & Video", icon: <Mic size={20} />, description: "Audio and video settings" },
+  { id: "voice_channels", name: "Voice Channels", icon: <Headphones size={20} />, description: "Join and manage voice channels" }, // New Category
   { id: "keybinds", name: "Keybinds", icon: <Keyboard size={20} />, description: "Keyboard shortcuts" },
   { id: "notifications", name: "Notifications", icon: <Bell size={20} />, description: "Notification preferences" },
   { id: "privacy", name: "Privacy & Safety", icon: <Shield size={20} />, description: "Privacy and safety settings" },
@@ -50,8 +52,68 @@ const settingsCategories: SettingsCategory[] = [
   { id: "advanced", name: "Advanced", icon: <Settings size={20} />, description: "Advanced settings" },
 ]
 
+// --- Simulated Signaling Server/Global State (for demonstration purposes only) ---
+// In a real app, this would be a WebSocket server or similar
+interface ChannelUser {
+  id: string;
+  username: string;
+  sdpOffer?: RTCSessionDescriptionInit;
+  iceCandidates: RTCIceCandidate[];
+}
+
+interface VoiceChannelState {
+  [channelId: string]: {
+    name: string;
+    users: { [userId: string]: ChannelUser };
+  };
+}
+
+// Initialize with some dummy channels
+const initialVoiceChannelState: VoiceChannelState = {
+  'general-1': {
+    name: 'General 1',
+    users: {},
+  },
+  'gaming-lobby': {
+    name: 'Gaming Lobby',
+    users: {},
+  },
+};
+
+// This map will hold RTCPeerConnections for each peer we connect to
+const peerConnections: Map<string, RTCPeerConnection> = new Map();
+const localStreams: Map<string, MediaStream> = new Map(); // Store local stream by userId (for current user)
+const remoteAudioElements: Map<string, HTMLAudioElement> = new Map(); // Map userId to their audio element
+
+// Simulating a global "voice channel server" state
+let globalVoiceChannelState: VoiceChannelState = JSON.parse(JSON.stringify(initialVoiceChannelState));
+
+// Function to simulate sending messages (e.g., via WebSocket)
+// In a real app, this would send to the signaling server, which would then forward to peers.
+const simulateSignalingMessage = (fromUserId: string, toUserId: string | 'all', type: string, payload: any) => {
+  // console.log(`[Simulated Signaling] ${fromUserId} -> ${toUserId} (${type}):`, payload);
+
+  if (type === 'join_channel' && toUserId === 'all') {
+    // A user joined, notify everyone already in that channel
+    const { channelId, user } = payload;
+    Object.values(globalVoiceChannelState[channelId].users).forEach(existingUser => {
+      if (existingUser.id !== fromUserId) {
+        // Simulate peer A sending offer to new peer B
+        // And peer B becoming aware of peer A
+        // We'll handle offer/answer flow within joinVoiceChannel directly for simplicity
+        // as this simulation is very limited.
+      }
+    });
+  } else if (type === 'sdp_offer' || type === 'sdp_answer' || type === 'ice_candidate') {
+    // This is where a real server would forward the message to the target peer.
+    // For this simulation, we'll rely on the `globalVoiceChannelState` and direct access
+    // within the `joinVoiceChannel` logic to manage SDPs/ICE.
+    // A more realistic simulation would involve a message queue or event emitter.
+  }
+};
+
 export default function SettingsPage() {
-  const router = useRouter(); // Initialize useRouter
+  const router = useRouter();
 
   const [activeCategory, setActiveCategory] = useState("profile")
   const [profileData, setProfileData] = useState({
@@ -61,7 +123,22 @@ export default function SettingsPage() {
     bio: "Hey there! I'm using this awesome chat app.",
     status: "online",
     avatar: "/placeholder.svg?height=80&width=80",
+    userId: `user-${Math.random().toString(36).substring(2, 9)}`, // Unique ID for current user
   })
+
+  // Voice Channel State
+  const [voiceChannels, setVoiceChannels] = useState<VoiceChannelState>(initialVoiceChannelState);
+  const [currentChannelId, setCurrentChannelId] = useState<string | null>(null);
+  const [channelUsers, setChannelUsers] = useState<{ id: string; username: string; isSpeaking: boolean }[]>([]);
+
+  // WebRTC refs
+  // We use a Map to hold RTCPeerConnection for each *remote* peer.
+  const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteAudioRefs = useRef<Map<string, HTMLAudioElement>>(new Map()); // Maps remote userId to audio element
+
+  // Ref to simulate global voice channel state (as if managed by a server)
+  const voiceChannelStateRef = useRef<VoiceChannelState>(globalVoiceChannelState);
 
   const [audioSettings, setAudioSettings] = useState({
     inputVolume: [75],
@@ -69,15 +146,11 @@ export default function SettingsPage() {
     micSensitivity: [60],
     noiseSuppression: true,
     echoCancellation: true,
-    autoGainControl: true, // New state for auto gain control
+    autoGainControl: true,
     inputDevice: "default",
     outputDevice: "default",
     cameraDevice: "default",
   })
-
-  const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([])
-  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([])
-  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([])
 
   // State for mic test
   const [micLevel, setMicLevel] = useState(0) // 0-100 for visual bar
@@ -85,7 +158,7 @@ export default function SettingsPage() {
 
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
-  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const mediaStreamTestRef = useRef<MediaStream | null>(null) // Renamed to avoid confusion with WebRTC stream
   const animationFrameRef = useRef<number | null>(null)
 
   const [keybinds, setKeybinds] = useState([
@@ -138,15 +211,11 @@ export default function SettingsPage() {
     }
 
     try {
-      // Request media stream to get device labels (permissions)
-      // We don't necessarily need the stream itself, just the permission check
-      // This is crucial for labels to appear, even if the stream is closed immediately.
       const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true }).catch(() => {
         console.warn("Microphone and/or camera permission denied. Device names may not be available.")
-        return null; // Return null if permission denied
+        return null;
       });
 
-      // Stop the temporary stream immediately after getting permissions
       if (tempStream) {
         tempStream.getTracks().forEach(track => track.stop());
       }
@@ -161,7 +230,6 @@ export default function SettingsPage() {
       setOutputDevices(audioOutput)
       setCameraDevices(videoInput)
 
-      // Set default selected devices if they were "default" and now specific devices are available
       setAudioSettings(prev => {
         let updatedSettings = { ...prev };
         if (audioInput.length > 0 && prev.inputDevice === "default") {
@@ -190,65 +258,56 @@ export default function SettingsPage() {
   // --- Mic Test Functions ---
 
   const startMicTest = async () => {
-    // Ensure we're in the audio settings and an input device is selected
     if (activeCategory !== "audio" || audioSettings.inputDevice === "no-devices" || audioSettings.inputDevice === "default") {
       console.warn("Cannot start mic test: Not in audio settings or no specific device selected.");
       alert("Please select a specific input device and grant microphone permissions to start the mic test.");
       return;
     }
 
-    // Stop any previously running test cleanly to ensure a fresh start
-    stopMicTest();
+    stopMicTest(); // Ensure a clean slate
 
     try {
-      // 1. Create a NEW AudioContext if one doesn't exist or was closed
-      // This is crucial: if audioContextRef.current is null, create a new one.
-      // Do NOT try to resume a closed context.
       if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
       const audioContext = audioContextRef.current;
 
       if (audioContext.state === 'suspended') {
-        await audioContext.resume(); // Ensure AudioContext is running
+        await audioContext.resume();
       }
 
       if (!analyserRef.current) {
         analyserRef.current = audioContext.createAnalyser();
         analyserRef.current.fftSize = 256;
-        analyserRef.current.smoothingTimeConstant = 0.8; // Smooth out rapid changes
+        analyserRef.current.smoothingTimeConstant = 0.8;
       }
       const analyser = analyserRef.current;
 
-      // 2. Get MediaStream from the selected device with initial constraints
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          deviceId: { exact: audioSettings.inputDevice }, // Use exact device ID
+          deviceId: { exact: audioSettings.inputDevice },
           echoCancellation: audioSettings.echoCancellation,
           noiseSuppression: audioSettings.noiseSuppression,
-          autoGainControl: audioSettings.autoGainControl, // Apply AGC constraint
+          autoGainControl: audioSettings.autoGainControl,
         },
       });
-      mediaStreamRef.current = stream;
+      mediaStreamTestRef.current = stream; // Use mediaStreamTestRef for the mic test stream
 
-      // Apply initial volume/sensitivity based on settings to the track
       const audioTrack = stream.getAudioTracks()[0];
       if (audioTrack) {
-        const volumeValue = audioSettings.inputVolume[0] / 100; // Normalize to 0-1
-        const sensitivityValue = audioSettings.micSensitivity[0] / 100; // Normalize to 0-1
+        const volumeValue = audioSettings.inputVolume[0] / 100;
+        const sensitivityValue = audioSettings.micSensitivity[0] / 100;
 
         audioTrack.applyConstraints({
           volume: audioSettings.autoGainControl ? undefined : (volumeValue * sensitivityValue),
         }).catch(e => console.error("Error applying volume constraints on start:", e));
       }
 
-      // 3. Connect MediaStream to AnalyserNode
       const source = audioContext.createMediaStreamSource(stream);
       source.connect(analyser);
-      analyser.connect(audioContext.destination); // Connect analyser to speakers for monitoring
+      analyser.connect(audioContext.destination);
 
-      // 4. Start analysis loop
-      const dataArray = new Uint8Array(analyser.frequencyBinBinCount);
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
       const updateMicLevel = () => {
         analyser.getByteFrequencyData(dataArray);
         let sum = 0;
@@ -256,18 +315,17 @@ export default function SettingsPage() {
           sum += dataArray[i];
         }
         const average = sum / dataArray.length;
-        // Map average (0-255) to 0-100, clamped
         setMicLevel(Math.min(100, Math.max(0, Math.floor((average / 255) * 100))));
         animationFrameRef.current = requestAnimationFrame(updateMicLevel);
       };
 
       animationFrameRef.current = requestAnimationFrame(updateMicLevel);
-      setIsMicTestRunning(true); // Set test to running
+      setIsMicTestRunning(true);
 
     } catch (err) {
       console.error("Error starting mic test:", err);
-      setMicLevel(0); // Reset level on error
-      setIsMicTestRunning(false); // Ensure test state is off
+      setMicLevel(0);
+      setIsMicTestRunning(false);
       alert("Could not start microphone test. Please ensure microphone permissions are granted and a device is selected. Error: " + (err as Error).message);
     }
   };
@@ -278,58 +336,312 @@ export default function SettingsPage() {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => {
-        console.log("Stopping track:", track.kind);
-        track.stop(); // Stop all tracks
+    if (mediaStreamTestRef.current) { // Use mediaStreamTestRef
+      mediaStreamTestRef.current.getTracks().forEach(track => {
+        console.log("Stopping mic test track:", track.kind);
+        track.stop();
       });
-      mediaStreamRef.current = null; // Clear the ref
+      mediaStreamTestRef.current = null;
     }
-    // Only close AudioContext if it exists and is not already closed
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      console.log("Closing AudioContext.");
+      console.log("Closing AudioContext for mic test.");
       audioContextRef.current.close()
         .then(() => {
-          audioContextRef.current = null; // IMPORTANT: Clear the ref after closing
+          audioContextRef.current = null;
         }).catch(e => console.error("Error closing AudioContext:", e));
     } else {
-        audioContextRef.current = null; // Ensure ref is null even if already closed or never existed
+        audioContextRef.current = null;
     }
     setMicLevel(0);
-    setIsMicTestRunning(false); // Set test to stopped
+    setIsMicTestRunning(false);
   };
+
+  // --- WebRTC Voice Channel Functions ---
+
+  // Helper to update global state and trigger re-render
+  const updateGlobalVoiceChannelState = useCallback(() => {
+    setVoiceChannels(JSON.parse(JSON.stringify(voiceChannelStateRef.current)));
+    if (currentChannelId) {
+      setChannelUsers(Object.values(voiceChannelStateRef.current[currentChannelId]?.users || {}));
+    } else {
+      setChannelUsers([]);
+    }
+  }, [currentChannelId]);
+
+  // Handler for receiving "signaling" messages (simulated)
+  const handleSignalingMessage = useCallback(async (fromUserId: string, message: RTCSessionDescriptionInit | RTCIceCandidate | { type: string, userId: string }) => {
+    console.log(`[Simulated Signaling - ${profileData.userId}] Received message from ${fromUserId}:`, message);
+
+    // Get or create peer connection for this remote user
+    let peerConnection = peerConnectionsRef.current.get(fromUserId);
+
+    if (!peerConnection) {
+        peerConnection = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] // Google's public STUN server
+        });
+        peerConnectionsRef.current.set(fromUserId, peerConnection);
+        console.log(`[${profileData.userId}] Created new RTCPeerConnection for ${fromUserId}`);
+
+        // Add local stream tracks if available
+        if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach(track => peerConnection?.addTrack(track, localStreamRef.current!));
+        }
+
+        // Handle ICE candidates
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                // Simulate sending ICE candidate to remote peer
+                simulateSignalingMessage(profileData.userId, fromUserId, 'ice_candidate', event.candidate);
+            }
+        };
+
+        // Handle remote tracks
+        peerConnection.ontrack = (event) => {
+            const remoteStream = event.streams[0];
+            let audioEl = remoteAudioRefs.current.get(fromUserId);
+            if (!audioEl) {
+                audioEl = new Audio();
+                audioEl.autoplay = true;
+                audioEl.controls = false; // Usually hidden for voice channels
+                remoteAudioRefs.current.set(fromUserId, audioEl);
+                console.log(`[${profileData.userId}] Created audio element for ${fromUserId}`);
+                // You might append this to a hidden div for debugging, but it plays automatically
+                // document.body.appendChild(audioEl);
+            }
+            audioEl.srcObject = remoteStream;
+            console.log(`[${profileData.userId}] Received remote track from ${fromUserId}, playing.`);
+        };
+
+        // Set onnegotiationneeded (important for initial offer/answer and re-negotiation)
+        peerConnection.onnegotiationneeded = async () => {
+            try {
+                // Only create offer if we are the initiator (e.g., the user who *just* joined or who initiated the call)
+                // In a many-to-many setup, you might have each new peer offer to existing peers.
+                // For this simple simulation, we'll let the "newer" peer (who receives offer first) create answer.
+                // If this peer is the one initiating (e.g., connecting to a newly seen peer), it creates the offer.
+                if (peerConnection?.signalingState === 'stable' && currentChannelId) {
+                     // We'll create offers proactively when we become aware of a new peer through the channel state.
+                     // This `onnegotiationneeded` mostly handles renegotiation (e.g., adding/removing tracks)
+                     // or if the initial offer creation fails and needs to be retried.
+                }
+            } catch (e) {
+                console.error(`[${profileData.userId}] Error during onnegotiationneeded:`, e);
+            }
+        };
+    }
+
+    if (!peerConnection) {
+        console.error("Peer connection not established for message:", message);
+        return;
+    }
+
+    try {
+        if (message.type === 'offer') {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(message));
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            simulateSignalingMessage(profileData.userId, fromUserId, 'sdp_answer', peerConnection.localDescription);
+            console.log(`[${profileData.userId}] Sent answer to ${fromUserId}`);
+        } else if (message.type === 'answer') {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription(message));
+            console.log(`[${profileData.userId}] Received answer from ${fromUserId}`);
+        } else if (message.type === 'ice_candidate') {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(message));
+            console.log(`[${profileData.userId}] Added ICE candidate from ${fromUserId}`);
+        }
+    } catch (e) {
+        console.error(`[${profileData.userId}] Error processing signaling message from ${fromUserId}:`, e);
+    }
+  }, [profileData.userId, audioSettings.inputDevice, audioSettings.noiseSuppression, audioSettings.echoCancellation, audioSettings.autoGainControl, currentChannelId]); // Added dependencies
+
+  const joinVoiceChannel = async (channelId: string) => {
+    if (currentChannelId) {
+      console.warn(`Already in channel ${currentChannelId}. Leaving first.`);
+      await leaveVoiceChannel();
+    }
+
+    try {
+      // 1. Get local audio stream
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: audioSettings.inputDevice === "default" && inputDevices.length > 0 ? inputDevices[0].deviceId : audioSettings.inputDevice },
+          echoCancellation: audioSettings.echoCancellation,
+          noiseSuppression: audioSettings.noiseSuppression,
+          autoGainControl: audioSettings.autoGainControl,
+        },
+      });
+      localStreamRef.current = stream;
+
+      // Update global channel state: Current user joins the channel
+      const currentUser: ChannelUser = {
+        id: profileData.userId,
+        username: profileData.displayName || profileData.username,
+        iceCandidates: [],
+      };
+      voiceChannelStateRef.current[channelId].users[profileData.userId] = currentUser;
+      updateGlobalVoiceChannelState(); // Trigger re-render of channel users
+
+      // 2. Establish peer connections with ALL existing users in the channel
+      const existingUsers = Object.values(voiceChannelStateRef.current[channelId].users)
+                                  .filter(u => u.id !== profileData.userId);
+
+      for (const peerUser of existingUsers) {
+        console.log(`[${profileData.userId}] Initiating connection with existing peer: ${peerUser.username} (${peerUser.id})`);
+
+        const peerConnection = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+        peerConnectionsRef.current.set(peerUser.id, peerConnection);
+
+        // Add local stream to the peer connection
+        stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+        // Event: ICE candidates
+        peerConnection.onicecandidate = (event) => {
+          if (event.candidate) {
+            simulateSignalingMessage(profileData.userId, peerUser.id, 'ice_candidate', event.candidate);
+          }
+        };
+
+        // Event: Remote track received
+        peerConnection.ontrack = (event) => {
+            const remoteStream = event.streams[0];
+            let audioEl = remoteAudioRefs.current.get(peerUser.id);
+            if (!audioEl) {
+                audioEl = new Audio();
+                audioEl.autoplay = true;
+                audioEl.controls = false;
+                remoteAudioRefs.current.set(peerUser.id, audioEl);
+                // document.body.appendChild(audioEl); // For debugging, append to body
+            }
+            audioEl.srcObject = remoteStream;
+            console.log(`[${profileData.userId}] Received remote track from ${peerUser.username}`);
+        };
+
+        // Event: Negotiation needed (create offer)
+        peerConnection.onnegotiationneeded = async () => {
+          try {
+            if (peerConnection.signalingState === 'stable') {
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                simulateSignalingMessage(profileData.userId, peerUser.id, 'sdp_offer', peerConnection.localDescription);
+                console.log(`[${profileData.userId}] Sent offer to ${peerUser.username}`);
+            }
+          } catch (e) {
+            console.error(`[${profileData.userId}] Error creating offer for ${peerUser.username}:`, e);
+          }
+        };
+
+        // If the peer user already has an offer, we need to process it
+        if (peerUser.sdpOffer) {
+            console.log(`[${profileData.userId}] Processing existing SDP offer from ${peerUser.username}`);
+            await handleSignalingMessage(peerUser.id, peerUser.sdpOffer);
+        }
+
+        // Add any existing ICE candidates from the peer
+        for (const candidate of peerUser.iceCandidates) {
+            await handleSignalingMessage(peerUser.id, candidate);
+        }
+      }
+
+      // Simulate other existing users sending offers to this new user (this user)
+      // This is a simplified many-to-many model. In a real system, the server
+      // would notify existing users of the new user, and they'd initiate offers.
+      for (const peerUser of existingUsers) {
+          // This loop simulates each existing user creating an offer and sending it to `profileData.userId`
+          // We need to ensure `handleSignalingMessage` can process this.
+          const existingPeerPc = peerConnectionsRef.current.get(peerUser.id);
+          if (existingPeerPc && existingPeerPc.signalingState === 'stable') {
+              const offer = await existingPeerPc.createOffer();
+              await existingPeerPc.setLocalDescription(offer);
+              // Simulate the existing peer sending its offer to us.
+              // In a real scenario, this would go through the signaling server.
+              handleSignalingMessage(peerUser.id, existingPeerPc.localDescription!);
+          }
+      }
+
+
+      setCurrentChannelId(channelId);
+      console.log(`Joined channel: ${channelId}`);
+      alert(`You have joined ${voiceChannels[channelId].name}!`);
+
+    } catch (error) {
+      console.error("Error joining voice channel:", error);
+      alert(`Failed to join voice channel: ${(error as Error).message}. Make sure your microphone is working and permissions are granted.`);
+      await leaveVoiceChannel(); // Clean up if join fails
+    }
+  };
+
+  const leaveVoiceChannel = useCallback(async () => {
+    console.log("Leaving voice channel...");
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+
+    // Close all peer connections
+    peerConnectionsRef.current.forEach(pc => {
+      pc.close();
+      console.log("Closed peer connection.");
+    });
+    peerConnectionsRef.current.clear();
+
+    // Stop and remove all remote audio elements
+    remoteAudioRefs.current.forEach(audioEl => {
+      audioEl.srcObject = null; // Disconnect stream
+      audioEl.remove(); // Remove element from DOM if it was appended
+    });
+    remoteAudioRefs.current.clear();
+
+    // Update global channel state: Current user leaves the channel
+    if (currentChannelId && voiceChannelStateRef.current[currentChannelId]?.users[profileData.userId]) {
+      delete voiceChannelStateRef.current[currentChannelId].users[profileData.userId];
+      updateGlobalVoiceChannelState();
+    }
+
+    setCurrentChannelId(null);
+    setChannelUsers([]); // Clear users in UI
+    console.log("Left voice channel.");
+  }, [currentChannelId, profileData.userId, updateGlobalVoiceChannelState]);
+
 
   // Effect to manage device enumeration and global cleanup
   useEffect(() => {
     getMediaDevices(); // Initial device scan
     navigator.mediaDevices.addEventListener('devicechange', getMediaDevices);
 
-    // Cleanup: stop mic test and remove event listener when component unmounts
+    // Initial sync of voice channel state
+    setVoiceChannels(JSON.parse(JSON.stringify(globalVoiceChannelState)));
+
+    // Cleanup: stop mic test AND leave voice channel on unmount
     return () => {
-      stopMicTest(); // Ensure mic test is stopped on unmount
+      stopMicTest();
+      leaveVoiceChannel(); // Ensure WebRTC cleanup
       navigator.mediaDevices.removeEventListener('devicechange', getMediaDevices);
     };
-  }, []); // Run once on mount
+  }, [leaveVoiceChannel]); // Depend on leaveVoiceChannel as it's useCallback'd
 
   // Effect to stop mic test when category changes away from audio
   useEffect(() => {
     if (activeCategory !== "audio" && isMicTestRunning) {
-      console.log("Category changed, stopping mic test.");
+      console.log("Category changed from audio, stopping mic test.");
       stopMicTest();
     }
     // Re-enumerate devices when category changes to 'audio' to catch any new devices
     if (activeCategory === "audio") {
         getMediaDevices();
     }
-  }, [activeCategory, isMicTestRunning]);
+  }, [activeCategory, isMicTestRunning, stopMicTest]); // Add stopMicTest to dependencies
 
   // Effect: Apply constraints when slider values or audio settings change
   useEffect(() => {
-    if (isMicTestRunning && mediaStreamRef.current) {
-      const audioTrack = mediaStreamRef.current.getAudioTracks()[0];
+    // For mic test stream
+    if (isMicTestRunning && mediaStreamTestRef.current) {
+      const audioTrack = mediaStreamTestRef.current.getAudioTracks()[0];
       if (audioTrack) {
-        const volumeValue = audioSettings.inputVolume[0] / 100; // Normalize to 0-1
-        const sensitivityValue = audioSettings.micSensitivity[0] / 100; // Normalize to 0-1
+        const volumeValue = audioSettings.inputVolume[0] / 100;
+        const sensitivityValue = audioSettings.micSensitivity[0] / 100;
 
         const constraints: MediaTrackConstraints = {
           echoCancellation: audioSettings.echoCancellation,
@@ -337,21 +649,39 @@ export default function SettingsPage() {
           autoGainControl: audioSettings.autoGainControl,
         };
 
-        // Only apply volume constraint if autoGainControl is false
-        // Otherwise, native AGC tries to handle it.
         if (!audioSettings.autoGainControl) {
-            // Apply a combined effect of inputVolume and micSensitivity
             constraints.volume = volumeValue * sensitivityValue;
         } else {
-            // If AGC is true, explicitly remove the volume constraint if it was previously set,
-            // or ensure it's not present for AGC to work unimpeded.
             constraints.volume = undefined;
         }
-
 
         audioTrack.applyConstraints(constraints)
           .catch(e => console.error("Error applying media track constraints:", e));
       }
+    }
+
+    // For active voice channel stream (if any)
+    if (currentChannelId && localStreamRef.current) {
+        const audioTrack = localStreamRef.current.getAudioTracks()[0];
+        if (audioTrack) {
+            const volumeValue = audioSettings.inputVolume[0] / 100;
+            const sensitivityValue = audioSettings.micSensitivity[0] / 100;
+
+            const constraints: MediaTrackConstraints = {
+                echoCancellation: audioSettings.echoCancellation,
+                noiseSuppression: audioSettings.noiseSuppression,
+                autoGainControl: audioSettings.autoGainControl,
+            };
+
+            if (!audioSettings.autoGainControl) {
+                constraints.volume = volumeValue * sensitivityValue;
+            } else {
+                constraints.volume = undefined;
+            }
+
+            audioTrack.applyConstraints(constraints)
+                .catch(e => console.error("Error applying voice channel track constraints:", e));
+        }
     }
   }, [
     audioSettings.inputVolume,
@@ -360,6 +690,7 @@ export default function SettingsPage() {
     audioSettings.echoCancellation,
     audioSettings.autoGainControl,
     isMicTestRunning,
+    currentChannelId,
   ]);
 
 
@@ -402,9 +733,11 @@ export default function SettingsPage() {
   const handleResetToDefault = () => {
     const confirmed = confirm("Are you sure you want to reset all settings to their default values?")
     if (confirmed) {
-      // It's a good idea to stop the mic test if resetting audio settings
       if (isMicTestRunning) {
         stopMicTest();
+      }
+      if (currentChannelId) {
+        leaveVoiceChannel();
       }
 
       setProfileData({
@@ -414,6 +747,7 @@ export default function SettingsPage() {
         bio: "Hey there! I'm using this awesome chat app.",
         status: "online",
         avatar: "/placeholder.svg?height=80&width=80",
+        userId: `user-${Math.random().toString(36).substring(2, 9)}`, // Regenerate ID on reset
       })
       setAudioSettings({
         inputVolume: [75],
@@ -422,7 +756,7 @@ export default function SettingsPage() {
         noiseSuppression: true,
         echoCancellation: true,
         autoGainControl: true,
-        inputDevice: "default", // Reset to default will trigger re-selection on next audio category visit
+        inputDevice: "default",
         outputDevice: "default",
         cameraDevice: "default",
       })
@@ -465,15 +799,18 @@ export default function SettingsPage() {
         developerMode: false,
       })
       alert("All settings have been reset to default values.")
-      // Re-enumerate devices after reset to pick up new defaults
       getMediaDevices();
+      // Re-initialize global voice channel state (for demo)
+      globalVoiceChannelState = JSON.parse(JSON.stringify(initialVoiceChannelState));
+      voiceChannelStateRef.current = globalVoiceChannelState;
+      updateGlobalVoiceChannelState();
     }
   }
 
   const handleSaveChanges = () => {
-    // Stop mic test when saving settings, as the audio pipeline might need to be re-initialized
-    // on a full application usage after settings are persisted.
     stopMicTest();
+    // In a real app, you might also have a mechanism to reconnect voice channels
+    // or keep them connected, but for this demo, we'll assume they're transient.
 
     const currentSettings = {
       profileData,
@@ -487,7 +824,7 @@ export default function SettingsPage() {
     alert("Settings saved successfully!")
   }
 
-  // --- Render functions (modifications for audio/video selects) ---
+  // --- Render Functions ---
 
   const renderProfileSettings = () => (
     <div className="space-y-6">
@@ -593,7 +930,6 @@ export default function SettingsPage() {
               value={audioSettings.inputDevice}
               onValueChange={(value) => {
                 setAudioSettings({ ...audioSettings, inputDevice: value });
-                // If the device changes, stop the current test to prepare for new one
                 stopMicTest();
               }}
             >
@@ -655,7 +991,6 @@ export default function SettingsPage() {
               max={100}
               step={1}
               className="w-full"
-              // Only disable if AGC is OFF, otherwise it still affects output *before* AGC
               disabled={!isMicTestRunning || !audioSettings.autoGainControl}
             />
              {!audioSettings.autoGainControl && (
@@ -673,7 +1008,7 @@ export default function SettingsPage() {
               max={100}
               step={1}
               className="w-full"
-              disabled={!isMicTestRunning || audioSettings.autoGainControl} // Disable if AGC is on
+              disabled={!isMicTestRunning || audioSettings.autoGainControl}
             />
             {audioSettings.autoGainControl && (
                 <p className="text-sm text-gray-400">
@@ -795,6 +1130,80 @@ export default function SettingsPage() {
       </Card>
     </div>
   )
+
+  const renderVoiceChannels = () => (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center space-x-2">
+            <Headphones size={20} />
+            <span>Voice Channels</span>
+          </CardTitle>
+          <CardDescription>Join a voice channel to chat with others.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {Object.entries(voiceChannels).map(([channelId, channel]) => (
+            <div
+              key={channelId}
+              className="flex items-center justify-between p-3 border rounded-lg bg-gray-800"
+            >
+              <div className="flex-1">
+                <div className="font-medium">{channel.name}</div>
+                <div className="text-sm text-gray-400">
+                  {Object.keys(channel.users).length} user(s) in channel
+                </div>
+              </div>
+              <div>
+                {currentChannelId === channelId ? (
+                  <Button variant="destructive" onClick={leaveVoiceChannel}>
+                    Leave Channel
+                  </Button>
+                ) : (
+                  <Button onClick={() => joinVoiceChannel(channelId)} disabled={currentChannelId !== null}>
+                    Join Channel
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+          {currentChannelId && (
+            <>
+              <Separator />
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold flex items-center">
+                  <Volume2 className="mr-2" size={18} />
+                  Users in {voiceChannels[currentChannelId]?.name}
+                </h3>
+                <ul className="space-y-2">
+                  {channelUsers.length > 0 ? (
+                    channelUsers.map((user) => (
+                      <li key={user.id} className="flex items-center space-x-2 text-gray-300">
+                        <Badge
+                          variant="secondary"
+                          className={`flex items-center ${user.id === profileData.userId ? 'bg-indigo-600' : ''}`}
+                        >
+                          <Avatar className="w-5 h-5 mr-1">
+                            <AvatarFallback>{user.username[0]}</AvatarFallback>
+                          </Avatar>
+                          {user.username} {user.id === profileData.userId && "(You)"}
+                        </Badge>
+                      </li>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-400">No other users in this channel (simulated).</p>
+                  )}
+                </ul>
+                <p className="text-sm text-gray-400 mt-2">
+                    Note: This is a simplified simulation. In a real application, you'd see real-time connections.
+                </p>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+
 
   const renderKeybinds = () => (
     <div className="space-y-6">
@@ -1175,6 +1584,8 @@ export default function SettingsPage() {
         return renderProfileSettings()
       case "audio":
         return renderAudioSettings()
+      case "voice_channels": // New case for voice channels
+        return renderVoiceChannels()
       case "keybinds":
         return renderKeybinds()
       case "notifications":
