@@ -27,9 +27,9 @@
 }
 {
   "compilerOptions": {
-    "baseUrl": ".", 
-    "paths": {
-      "@/*": ["./*"]
-    }
+    "sourceMap": true,
+    "preserveSymlinks": false,
+    "paths": {},
+    "baseUrl": "."
   }
 }
