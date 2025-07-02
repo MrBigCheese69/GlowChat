@@ -19,14 +19,15 @@ import {
   Pin,
 } from "lucide-react"
 
-import {
-  collection,
-  addDoc,
-  serverTimestamp,
-  onSnapshot,
-  query,
-  orderBy,
+import { 
+  collection, 
+  addDoc, 
+  serverTimestamp, 
+  onSnapshot, 
+  query, 
+  orderBy 
 } from "firebase/firestore"
+
 import { db } from "../firebase" // Adjust path if needed
 
 interface Message {
