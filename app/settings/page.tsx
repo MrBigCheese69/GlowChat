@@ -63,6 +63,7 @@ export default function SettingsPage() {
     micSensitivity: [60],
     noiseSuppression: true,
     echoCancellation: true,
+    autoGainControl: true, // New state for auto gain control
     inputDevice: "default",
     outputDevice: "default",
     cameraDevice: "default",
@@ -193,15 +194,29 @@ export default function SettingsPage() {
       }
       const analyser = analyserRef.current;
 
-      // 2. Get MediaStream from the selected device
+      // 2. Get MediaStream from the selected device with initial constraints
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: { exact: audioSettings.inputDevice }, // Use exact device ID
           echoCancellation: audioSettings.echoCancellation,
-          noiseSuppression: audioSettings.noiseSuppression
+          noiseSuppression: audioSettings.noiseSuppression,
+          autoGainControl: audioSettings.autoGainControl, // Apply AGC constraint
+          // Volume constraint can also be applied here, but we'll apply it to the track for dynamic changes
         },
       });
       mediaStreamRef.current = stream;
+
+      // Apply initial volume based on settings
+      const audioTrack = stream.getAudioTracks()[0];
+      if (audioTrack) {
+        const volumeValue = audioSettings.inputVolume[0] / 100; // Normalize to 0-1
+        const sensitivityValue = audioSettings.micSensitivity[0] / 100; // Normalize to 0-1
+
+        audioTrack.applyConstraints({
+          volume: audioSettings.autoGainControl ? undefined : (volumeValue * sensitivityValue),
+          // If AGC is true, let it handle volume. Otherwise, apply combined manual volume/sensitivity.
+        }).catch(e => console.error("Error applying volume constraints on start:", e));
+      }
 
       // 3. Connect MediaStream to AnalyserNode
       const source = audioContext.createMediaStreamSource(stream);
@@ -270,6 +285,38 @@ export default function SettingsPage() {
     }
   }, [activeCategory, isMicTestRunning]);
 
+  // New Effect: Apply constraints when slider values or audio settings change
+  useEffect(() => {
+    if (isMicTestRunning && mediaStreamRef.current) {
+      const audioTrack = mediaStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        const volumeValue = audioSettings.inputVolume[0] / 100; // Normalize to 0-1
+        const sensitivityValue = audioSettings.micSensitivity[0] / 100; // Normalize to 0-1
+
+        const constraints: MediaTrackConstraints = {
+          echoCancellation: audioSettings.echoCancellation,
+          noiseSuppression: audioSettings.noiseSuppression,
+          autoGainControl: audioSettings.autoGainControl,
+        };
+
+        // Only apply volume constraint if autoGainControl is false
+        if (!audioSettings.autoGainControl) {
+            constraints.volume = volumeValue * sensitivityValue;
+        }
+
+        audioTrack.applyConstraints(constraints)
+          .catch(e => console.error("Error applying media track constraints:", e));
+      }
+    }
+  }, [
+    audioSettings.inputVolume,
+    audioSettings.micSensitivity,
+    audioSettings.noiseSuppression,
+    audioSettings.echoCancellation,
+    audioSettings.autoGainControl,
+    isMicTestRunning,
+  ]);
+
 
   // --- Handlers for button actions ---
 
@@ -324,6 +371,7 @@ export default function SettingsPage() {
         micSensitivity: [60],
         noiseSuppression: true,
         echoCancellation: true,
+        autoGainControl: true,
         inputDevice: "default",
         outputDevice: "default",
         cameraDevice: "default",
@@ -551,7 +599,13 @@ export default function SettingsPage() {
               max={100}
               step={1}
               className="w-full"
+              disabled={!isMicTestRunning || !audioSettings.autoGainControl} // Disable if AGC is off, as sensitivity takes over
             />
+             {!audioSettings.autoGainControl && (
+                <p className="text-sm text-gray-400">
+                    Input Volume is controlled by Microphone Sensitivity when Automatic Gain Control is off.
+                </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -562,6 +616,23 @@ export default function SettingsPage() {
               max={100}
               step={1}
               className="w-full"
+              disabled={!isMicTestRunning || audioSettings.autoGainControl} // Disable if AGC is on
+            />
+            {audioSettings.autoGainControl && (
+                <p className="text-sm text-gray-400">
+                    Microphone Sensitivity is controlled by Automatic Gain Control. Turn AGC off to adjust manually.
+                </p>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label htmlFor="auto-gain-control">Automatic Gain Control (AGC)</Label>
+            <Switch
+              id="auto-gain-control"
+              checked={audioSettings.autoGainControl}
+              onCheckedChange={(checked) => {
+                setAudioSettings({ ...audioSettings, autoGainControl: checked });
+              }}
             />
           </div>
 
