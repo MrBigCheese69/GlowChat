@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { logMessage } from "../utils/logMessage";
+import { logMessage } from "./logMessage";
 
 export default function ChatInput() {
   const [input, setInput] = useState("");

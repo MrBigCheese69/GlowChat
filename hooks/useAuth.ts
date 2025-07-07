@@ -21,3 +21,4 @@ export function useAuth(): { user: User | null; loading: boolean } {
 
   return { user, loading };
 }
+import { auth } from '@/firebase';
